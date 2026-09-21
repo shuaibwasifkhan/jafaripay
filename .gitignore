@@ -1,0 +1,24 @@
+# ── Secrets / environment ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Data / database (live state, never commit) ───────────────────────
+data/
+data_corrupt_backup/
+*.db
+*.db-wal
+*.db-shm
+
+# ── Dependencies / build artifacts ───────────────────────────────────
+node_modules/
+dist/
+
+# ── Runtime logs / traces ────────────────────────────────────────────
+console.jsonl
+traces.jsonl
+
+# ── Solidity build output / vendored deps ────────────────────────────
+contracts/out/
+contracts/cache/
+lib/forge-std/

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="generator" content="Arc Studio by Circle — https://studio.arc.io" />
+    <title>JafariPay — Accept USDC payments in minutes</title>
+    <meta name="description" content="Non-custodial USDC payment infrastructure. Accept payments with a few lines of code." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <!-- Built with Arc Studio — https://studio.arc.io -->
+    <!-- Token bootstrap: runs synchronously before React mounts.
+         Reads jp_session_js cookie (non-httpOnly, set by server) and
+         mirrors it into localStorage so api.ts getSessionToken() finds it.
+         Also reads a ?_t= URL param written by AuthPage as a fallback. -->
+    <script>
+      (function(){
+        // ── Step 1: Extract token from URL ?_t= param ──────────────────────
+        try {
+          var q = new URLSearchParams(window.location.search).get('_t');
+          if (q) {
+            localStorage.setItem('jp_session_token', q);
+            sessionStorage.setItem('jp_session_token', q);
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        } catch(e) {}
+
+        // ── Step 2: Mirror jp_session_js cookie → localStorage ─────────────
+        try {
+          if (!localStorage.getItem('jp_session_token')) {
+            var cm = document.cookie.match(/(?:^|;\s*)jp_session_js=([^;]+)/);
+            if (cm && cm[1]) {
+              localStorage.setItem('jp_session_token', decodeURIComponent(cm[1]));
+              sessionStorage.setItem('jp_session_token', decodeURIComponent(cm[1]));
+            }
+          }
+        } catch(e) {}
+
+        // ── Step 3: Register service worker (persists across bundle updates) ─
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(function(reg) {
+            // Send current token to SW immediately
+            var tok = localStorage.getItem('jp_session_token') || sessionStorage.getItem('jp_session_token');
+            if (tok && reg.active) reg.active.postMessage({ type: 'SAVE_TOKEN', token: tok });
+            else if (tok) {
+              navigator.serviceWorker.ready.then(function(r) {
+                r.active.postMessage({ type: 'SAVE_TOKEN', token: tok });
+              });
+            }
+          }).catch(function(){});
+        }
+
+        // ── Step 4: Monkey-patch fetch as belt-and-suspenders ─────────────
+        var _fetch = window.fetch;
+        window.fetch = function(input, init) {
+          try {
+            var url = (typeof input === 'string') ? input
+                    : (input instanceof Request ? input.url : String(input));
+            if (url.indexOf('/api/') !== -1 || url.indexOf('/auth/') !== -1
+                || url.indexOf('/v1/') !== -1 || url.indexOf('/projects') !== -1
+                || url.indexOf('/payments') !== -1 || url.indexOf('/api-keys') !== -1
+                || url.indexOf('/settlement-wallets') !== -1 || url.indexOf('/webhook') !== -1) {
+              var tok = localStorage.getItem('jp_session_token')
+                     || sessionStorage.getItem('jp_session_token');
+              if (tok) {
+                init = Object.assign({}, init || {});
+                var h = new Headers((init && init.headers) ? init.headers : {});
+                if (!h.has('X-Session-Token')) h.set('X-Session-Token', tok);
+                init.headers = h;
+              }
+            }
+          } catch(e) {}
+          return _fetch.apply(this, [input, init]);
+        };
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx?v=5"></script>
+  </body>
+</html>
+
