@@ -178,7 +178,70 @@ nginx -t && systemctl reload nginx
 
 Network config is seeded automatically during migration. Both `arc_testnet` and
 `arc_mainnet` rows exist, but mainnet/live is gated off by `ENABLE_LIVE_PAYMENTS`
-and must stay disabled.
+and must stay disabled until you deliberately go live (see §11a).
+
+## 11a. Arc Mainnet configuration (production / live mode)
+
+> Live mode moves REAL USDC. Do not enable it until testnet sign-off is complete
+> and the settlement wallet address has been triple-checked. Enabling live mode is
+> a deliberate, separate step from deploying the code.
+
+Independently verified Arc Mainnet values (seeded/reconciled by migration):
+
+- Chain ID: `5042`
+- USDC (native predeploy, same address as testnet by design): `0x3600000000000000000000000000000000000000` (6 decimals)
+- RPC: `https://rpc.mainnet.arc.io`
+- Explorer: `https://explorer.arc.io`
+
+The migration performs an idempotent `UPDATE` of the `arc_mainnet` row on every
+start, so the verified chain_id / RPC / USDC / decimals / explorer are enforced
+even on a pre-existing database (`INSERT OR IGNORE` alone would not correct an
+existing row). The `arc_testnet` row is never modified by that reconcile step.
+
+### Required production environment variables (live)
+
+Set these in the server environment (never commit them):
+
+| Variable | Value / purpose |
+|---|---|
+| `NODE_ENV` | `production` |
+| `ENABLE_LIVE_PAYMENTS` | `true` — **enables** live keys, live settlement wallets, and Arc Mainnet payment intents. Leave unset for testnet-only. |
+| `SESSION_SECRET` / `API_KEY_HMAC_SECRET` / `WEBHOOK_HMAC_SECRET` | strong unique random values (≥16 chars) |
+| `ALLOWED_ORIGINS`, `CHECKOUT_BASE_URL`, `JAFARIPAY_DOMAIN` | real production domain |
+| `RPC_PROXY_BASE_URL` / `RPC_PROXY_TOKEN` / `RPC_PROXY_CHAINS` | optional keyed RPC proxy (must include `Arc` in chains to proxy mainnet); otherwise the public `https://rpc.mainnet.arc.io` fallback is used |
+
+Enabling `ENABLE_LIVE_PAYMENTS` flips three server-side gates (auth middleware,
+API-key creation, settlement-wallet creation). It does not change any verification
+or business logic — the payment engine is fully network-parameterized.
+
+### Settlement wallet setup (live)
+
+1. With `ENABLE_LIVE_PAYMENTS=true`, sign in to the dashboard and add a settlement
+   wallet with environment `live` (→ network `arc_mainnet`).
+2. Triple-check the address — customer USDC settles directly there; JafariPay is
+   non-custodial and never holds funds.
+3. Never store a private key or seed phrase anywhere in the app or config.
+
+### Live API key setup
+
+1. Create a `sk_live_` / `pk_live_` key pair from the dashboard (blocked with 403
+   unless `ENABLE_LIVE_PAYMENTS=true`).
+2. `sk_live_` creates Arc Mainnet payment intents (network derived from the key
+   environment — never a fallback). Keep the secret key server-side only.
+
+### Production smoke-test procedure (one deliberate 0.01 USDC payment)
+
+1. Confirm `ENABLE_LIVE_PAYMENTS=true`, live settlement wallet configured, and a
+   `sk_live_` key issued.
+2. Create ONE payment intent for `0.01` USDC via `POST /v1/payment-intents` with
+   the `sk_live_` key (network resolves to `arc_mainnet`, chain_id `5042`).
+3. Open the returned `checkout_url`, connect a funded Arc Mainnet wallet, and pay.
+4. Capture the tx hash; the backend independently verifies it (correct network,
+   receipt success, configured USDC contract, exact amount, exact recipient,
+   duplicate protection, PI expiry/status) before marking it `succeeded`.
+5. Confirm the dashboard shows the payment `succeeded` with the correct explorer
+   link, and that the `payment.succeeded` webhook was delivered and signature-verified.
+
 
 ## 12. Backup requirements
 
@@ -207,10 +270,19 @@ Store backups off-server. Test restores periodically.
 - [ ] `NODE_ENV=production`
 - [ ] Strong `SESSION_SECRET`, `API_KEY_HMAC_SECRET`, `WEBHOOK_HMAC_SECRET` set
 - [ ] `ALLOWED_ORIGINS`, `CHECKOUT_BASE_URL`, `JAFARIPAY_DOMAIN` set to the real domain
-- [ ] `ENABLE_LIVE_PAYMENTS` unset (test-only)
 - [ ] HTTPS working, HTTP redirects to HTTPS
 - [ ] Nginx forwards `X-Forwarded-Proto` and `X-Forwarded-For`
 - [ ] Data directory on persistent storage with automated backups
 - [ ] One real Arc Testnet USDC payment completed end-to-end via the checkout UI
       (requires a funded browser wallet — cannot be done from CI)
+
+### Testnet-only operation
+- [ ] `ENABLE_LIVE_PAYMENTS` unset
+
+### Going live on Arc Mainnet (deliberate, after testnet sign-off — see §11a)
+- [ ] `ENABLE_LIVE_PAYMENTS=true`
+- [ ] `arc_mainnet` network_configs row verified: chain_id `5042`, USDC `0x3600…0000`, RPC `https://rpc.mainnet.arc.io`, explorer `https://explorer.arc.io`
+- [ ] Live settlement wallet added and address triple-checked
+- [ ] `sk_live_` / `pk_live_` keys issued; secret key kept server-side only
+- [ ] One deliberate 0.01 USDC Arc Mainnet smoke test verified `succeeded`
 

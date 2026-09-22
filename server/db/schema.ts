@@ -270,7 +270,7 @@ export function migrate(): void {
   )`);
   db.run('CREATE INDEX IF NOT EXISTS idx_audit_merchant ON audit_logs(merchant_id)');
 
-  // Seed network configs (idempotent)
+  // Seed network configs (idempotent insert)
   const usdcAddress = '0x3600000000000000000000000000000000000000'; // arc-studio-allow-onchain-literal
   db.run(
     `INSERT OR IGNORE INTO network_configs(id,network,chain_id,rpc_url,explorer_base,usdc_address,usdc_decimals) VALUES(?,?,?,?,?,?,?)`,
@@ -281,6 +281,21 @@ export function migrate(): void {
   db.run(
     `INSERT OR IGNORE INTO network_configs(id,network,chain_id,rpc_url,explorer_base,usdc_address,usdc_decimals) VALUES(?,?,?,?,?,?,?)`,
     ['nc_arc_mainnet', 'arc_mainnet', 5042, // arc-studio-allow-onchain-literal
+     buildRpcUrl('Arc', 'https://rpc.mainnet.arc.io'), // arc-studio-allow-onchain-literal
+     'https://explorer.arc.io', usdcAddress, 6] // arc-studio-allow-onchain-literal
+  );
+
+  // Reconcile the Arc MAINNET row to the independently-verified canonical values.
+  // INSERT OR IGNORE above does nothing when the row already exists, so an existing
+  // DB created before these values were confirmed would keep stale data. This
+  // UPDATE is idempotent and self-healing: it enforces the verified Arc Mainnet
+  // chain_id / RPC / USDC predeploy / decimals / explorer on every migrate().
+  // The Testnet row is intentionally NOT touched here.
+  db.run(
+    `UPDATE network_configs
+       SET chain_id=?, rpc_url=?, explorer_base=?, usdc_address=?, usdc_decimals=?
+     WHERE network='arc_mainnet'`,
+    [5042, // arc-studio-allow-onchain-literal
      buildRpcUrl('Arc', 'https://rpc.mainnet.arc.io'), // arc-studio-allow-onchain-literal
      'https://explorer.arc.io', usdcAddress, 6] // arc-studio-allow-onchain-literal
   );
