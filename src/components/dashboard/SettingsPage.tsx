@@ -85,12 +85,12 @@ export default function SettingsPage() {
           <div>
             <label className="text-sm font-medium text-slate-300 block mb-1.5">Display name</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="My Company"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-white/6 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+              className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
           </div>
           <div>
             <label className="text-sm font-medium text-slate-300 block mb-1.5">Email (optional)</label>
             <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="you@yourcompany.com"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-white/6 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+              className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
           </div>
           <Button onClick={() => { void saveProfile(); }} loading={savingProfile} size="sm"><Save size={13} /> Save profile</Button>
         </div>
@@ -143,13 +143,13 @@ export default function SettingsPage() {
                     <label className="text-xs font-medium text-slate-300 block mb-1">Wallet address</label>
                     <input value={newAddress} onChange={e => { setNewAddress(e.target.value); setAddressError(''); }}
                       placeholder="0x..."
-                      className={`w-full px-3 py-2 rounded-lg bg-white/6 border text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${addressError ? 'border-red-500/50' : 'border-white/10'}`} />
+                      className={`w-full px-3 py-2 rounded-lg bg-white border text-xs font-mono text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${addressError ? 'border-red-500/50' : 'border-white/10'}`} />
                     {addressError && <p className="text-xs text-red-400 mt-1">{addressError}</p>}
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-300 block mb-1">Label (optional)</label>
                     <input value={walletLabel} onChange={e => setWalletLabel(e.target.value)} placeholder="Main wallet"
-                      className="w-full px-3 py-2 rounded-lg bg-white/6 border border-white/10 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-white/10 text-xs text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" loading={savingWallet} onClick={() => { void addWallet(env); }} className="flex-1">Save wallet</Button>

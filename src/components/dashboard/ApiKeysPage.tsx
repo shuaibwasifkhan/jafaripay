@@ -112,7 +112,7 @@ export default function ApiKeysPage() {
             <div>
               <label className="text-sm font-medium text-slate-300 block mb-1.5">Label (optional)</label>
               <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Production server"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white/6 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
             </div>
             <p className="text-xs text-slate-500">This will create both a publishable (<code className="text-slate-400">pk_{env}_</code>) and secret (<code className="text-slate-400">sk_{env}_</code>) key pair.</p>
             <div className="flex gap-2">

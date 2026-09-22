@@ -56,12 +56,12 @@ export default function ProjectsPage() {
             <div>
               <label className="text-sm font-medium text-slate-300 block mb-1.5">Project name</label>
               <input value={name} onChange={e => setName(e.target.value)} placeholder="My Store"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white/6 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
             </div>
             <div>
               <label className="text-sm font-medium text-slate-300 block mb-1.5">Description (optional)</label>
               <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="E-commerce store"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white/6 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
             </div>
             <div>
               <label className="text-sm font-medium text-slate-300 block mb-1.5">Environment</label>

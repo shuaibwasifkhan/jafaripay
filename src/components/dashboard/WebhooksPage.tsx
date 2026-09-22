@@ -119,7 +119,7 @@ export default function WebhooksPage() {
                   <label className="text-sm font-medium text-slate-300 block mb-1.5">Endpoint URL</label>
                   <input value={url} onChange={e => { setUrl(e.target.value); validateUrl(e.target.value); }}
                     placeholder="https://yourapp.com/webhooks/jafaripay"
-                    className={`w-full px-3.5 py-2.5 rounded-xl bg-white/6 border text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${urlError ? 'border-red-500/50' : 'border-white/10'}`} />
+                    className={`w-full px-3.5 py-2.5 rounded-xl bg-white border text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${urlError ? 'border-red-500/50' : 'border-white/10'}`} />
                   {urlError && <p className="text-xs text-red-400 mt-1">{urlError}</p>}
                 </div>
                 <div>

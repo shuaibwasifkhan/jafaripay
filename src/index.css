@@ -11,3 +11,25 @@ body {
   font-family: system-ui, sans-serif;
   min-height: 100dvh;
 }
+
+/* ── Editable field polish (surgical visual pass) ─────────────────────────────
+   Ensure typed text is clearly BLACK with a visible caret across every editable
+   field (inputs, textareas, selects). Placeholder styling is left to component
+   classes so it stays readably muted. Business logic is unaffected. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea,
+select {
+  color: #000;
+  caret-color: #000;
+}
+
+/* Autofill: some browsers force a light-blue background with dark text; keep the
+   text black so autofilled values remain clearly legible. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: #000;
+  caret-color: #000;
+}

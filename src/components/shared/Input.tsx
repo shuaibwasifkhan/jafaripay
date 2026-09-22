@@ -14,7 +14,7 @@ export function Input({ label, error, hint, className, ...rest }: Props) {
       <input
         {...rest}
         className={clsx(
-          'w-full px-3.5 py-2.5 rounded-xl bg-white/6 border text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all',
+          'w-full px-3.5 py-2.5 rounded-xl bg-white border text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all',
           error ? 'border-red-500/50' : 'border-white/10 focus:border-blue-500/50',
           className
         )}
