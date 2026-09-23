@@ -64,7 +64,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"], // allow SDK embed
       styleSrc: ["'self'", "'unsafe-inline'"],
-      connectSrc: ["'self'", 'https://*.arc.io', 'https://*.circle.com'],
+      connectSrc: ["'self'", 'https://*.arc.io', 'https://*.arc.network', 'https://*.circle.com'],
       imgSrc: ["'self'", 'data:', 'https:'],
       frameSrc: ["'none'"],
     },
