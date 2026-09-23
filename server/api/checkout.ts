@@ -8,7 +8,7 @@
 import { Router, type Request, type Response } from 'express';
 import { getDb } from '../db/schema.js';
 import { generateId } from '../lib/ids.js';
-import { verifyPayment } from '../blockchain/arc-provider.js';
+import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
 import { enqueueWebhookDeliveries } from '../webhooks/delivery.js';
 import { formatBaseUnitsToDecimal } from '../lib/money.js';
 
@@ -72,20 +72,27 @@ router.post('/:id/verify', async (req: Request, res: Response) => {
     res.json({ status: 'succeeded', payment }); return;
   }
 
-  // Expired check
-  if (pi.status === 'expired' || (pi.expires_at && Math.floor(Date.now() / 1000) > pi.expires_at)) {
+  // Expiry check — grace-aware. A genuinely settled payment landing shortly
+  // after expiry can still be verified and credited within the grace window.
+  const nowS = Math.floor(Date.now() / 1000);
+  const withinGrace = pi.expires_at + PI_SETTLEMENT_GRACE_S >= nowS;
+  // Past the grace window: no longer creditable — settle as expired.
+  if (!withinGrace) {
     if (pi.status !== 'expired') {
       db.prepare("UPDATE payment_intents SET status='expired',updated_at=unixepoch() WHERE id=?").run(pi.id);
     }
     res.status(400).json({ status: 'expired', error: 'Payment intent has expired' }); return;
   }
 
-  if (!['requires_payment', 'processing'].includes(pi.status)) {
+  // Within grace: accept requires_payment / processing, and re-open an
+  // expired PI so a genuinely settled payment can still be verified.
+  // succeeded is handled above; cancelled/failed remain terminal and are rejected.
+  if (!['requires_payment', 'processing', 'expired'].includes(pi.status)) {
     res.status(400).json({ error: `Payment intent is in "${pi.status}" state` }); return;
   }
 
-  // Mark as processing
-  db.prepare("UPDATE payment_intents SET status='processing',updated_at=unixepoch() WHERE id=? AND status='requires_payment'").run(pi.id);
+  // Mark as processing (from requires_payment OR within-grace expired)
+  db.prepare("UPDATE payment_intents SET status='processing',updated_at=unixepoch() WHERE id=? AND status IN ('requires_payment','expired')").run(pi.id);
   enqueueWebhookDeliveries(pi.id, 'payment.processing', { payment_intent_id: pi.id }, pi.environment as 'test' | 'live');
 
   // Blockchain verification

@@ -11,6 +11,15 @@
 import { createPublicClient, http, parseAbiItem, decodeEventLog, type PublicClient } from 'viem';
 import { getDb } from '../db/schema.js';
 
+/**
+ * Bounded settlement grace after a Payment Intent's expiry during which a
+ * genuinely settled on-chain payment can still be verified and credited.
+ * This ONLY widens the time window — every verification rule
+ * (network, receipt success, USDC contract, Transfer event, exact recipient,
+ * exact base-unit amount, duplicate/replay protection) remains fully enforced.
+ */
+export const PI_SETTLEMENT_GRACE_S = 20 * 60; // 20 minutes
+
 // ── Network config ─────────────────────────────────────────────────────────
 
 export interface NetworkConfig {
@@ -266,9 +275,11 @@ export async function verifyPayment(input: VerificationInput): Promise<Verificat
   if (pi.status === 'cancelled') return { success: false, failureReason: 'Payment intent is cancelled' };
   if (pi.status === 'failed') return { success: false, failureReason: 'Payment intent is in failed state' };
 
-  // Check expiration
+  // Check expiration — allow verification up to expires_at + settlement grace,
+  // so a genuinely settled payment landing shortly after expiry can still be
+  // credited. All other verification rules above remain fully enforced.
   const piRow = db.prepare('SELECT expires_at FROM payment_intents WHERE id = ?').get(input.paymentIntentId) as { expires_at: number } | undefined;
-  if (piRow && piRow.expires_at < Math.floor(Date.now() / 1000)) {
+  if (piRow && piRow.expires_at + PI_SETTLEMENT_GRACE_S < Math.floor(Date.now() / 1000)) {
     return { success: false, failureReason: 'Payment intent has expired' };
   }
 

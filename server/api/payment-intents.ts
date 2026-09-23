@@ -8,7 +8,7 @@ import { requireApiKey, type AuthedRequest } from '../middleware/auth.js';
 import { getDb } from '../db/schema.js';
 import { generatePaymentIntentId, generateId } from '../lib/ids.js';
 import { validatePositiveAmount, formatBaseUnitsToDecimal } from '../lib/money.js';
-import { verifyPayment } from '../blockchain/arc-provider.js';
+import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
 import { enqueueWebhookDeliveries } from '../webhooks/delivery.js';
 
 const router = Router();
@@ -157,14 +157,17 @@ router.post('/:id/verify', requireApiKey(), async (req: Request, res: Response) 
   const { tx_hash } = req.body as { tx_hash: string };
   if (!tx_hash) { res.status(400).json({ error: 'tx_hash is required' }); return; }
 
-  type PiFullRow = { id: string; status: string; network: string; settlement_address: string; amount_base_units: string; usdc_address: string; chain_id: number; amount_decimal: string; environment: string; merchant_id: string };
+  type PiFullRow = { id: string; status: string; network: string; settlement_address: string; amount_base_units: string; usdc_address: string; chain_id: number; amount_decimal: string; environment: string; merchant_id: string; expires_at: number };
   const pi = db.prepare('SELECT * FROM payment_intents WHERE id=? AND merchant_id=?').get(req.params.id, ar.merchantId!) as PiFullRow | null;
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
 
   if (pi.status === 'succeeded') {
     res.json({ status: 'succeeded', payment: db.prepare('SELECT * FROM payments WHERE payment_intent_id=?').get(pi.id) }); return;
   }
-  if (!['requires_payment','processing'].includes(pi.status)) {
+  // Grace-aware: an expired PI may still be verified within the settlement grace
+  // window so a genuinely settled payment can be credited. cancelled/failed stay terminal.
+  const withinGrace = pi.expires_at + PI_SETTLEMENT_GRACE_S >= Math.floor(Date.now() / 1000);
+  if (!(['requires_payment', 'processing'].includes(pi.status) || (pi.status === 'expired' && withinGrace))) {
     res.status(400).json({ error: `Payment intent is in "${pi.status}" state` }); return;
   }
 
