@@ -61,58 +61,58 @@ export default function ApiKeysPage() {
     <div className="p-8 max-w-2xl">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>API Keys</h1>
-          <p className="text-slate-400 text-sm">Manage test and live API credentials</p>
+          <h1 className="text-2xl font-bold text-ink tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>API Keys</h1>
+          <p className="text-slate-500 text-sm">Manage test and live API credentials</p>
         </div>
         <Button onClick={() => setCreating(true)} size="sm"><Plus size={14} /> Create keys</Button>
       </div>
 
       {/* Security note */}
-      <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/6 border border-amber-500/15 mb-6">
-        <ShieldCheck size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-gold-50 border border-gold-200 mb-6">
+        <ShieldCheck size={13} className="text-gold-600 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-xs font-semibold text-amber-300 mb-0.5">Keep secret keys safe</p>
-          <p className="text-xs text-amber-400/70">Secret keys (<code className="text-amber-300">sk_</code>) are only shown once. Store them in environment variables. Never expose them in frontend code or commit them to source control.</p>
+          <p className="text-xs font-semibold text-gold-800 mb-0.5">Keep secret keys safe</p>
+          <p className="text-xs text-gold-700/70">Secret keys (<code className="text-gold-700">sk_</code>) are only shown once. Store them in environment variables. Never expose them in frontend code or commit them to source control.</p>
         </div>
       </div>
 
       {/* New key reveal */}
       {newKey && (
-        <div className="p-5 rounded-2xl bg-emerald-500/6 border border-emerald-500/20 mb-6">
+        <div className="p-5 rounded-2xl bg-forest-50 border border-forest-200 mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <ShieldCheck size={13} className="text-emerald-400" />
-            <p className="text-xs font-semibold text-emerald-300">New secret key — copy it now, it will not be shown again</p>
+            <ShieldCheck size={13} className="text-forest-600" />
+            <p className="text-xs font-semibold text-forest-800">New secret key — copy it now, it will not be shown again</p>
           </div>
-          <div className="flex items-center gap-2 bg-white/6 rounded-xl p-3">
-            <code className="flex-1 text-xs font-mono text-slate-300 break-all">{newKey.full_key}</code>
-            <button onClick={() => { void copyKey(newKey.full_key); }} className="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10">
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+          <div className="flex items-center gap-2 bg-sand-100 rounded-xl p-3">
+            <code className="flex-1 text-xs font-mono text-slate-700 break-all">{newKey.full_key}</code>
+            <button onClick={() => { void copyKey(newKey.full_key); }} className="flex-shrink-0 p-1.5 rounded-lg text-slate-500 hover:text-ink hover:bg-sand-200">
+              {copied ? <Check size={14} className="text-forest-600" /> : <Copy size={14} />}
             </button>
           </div>
-          <button onClick={() => setNewKey(null)} className="text-xs text-slate-500 hover:text-slate-300 mt-3">Dismiss</button>
+          <button onClick={() => setNewKey(null)} className="text-xs text-slate-500 hover:text-ink mt-3">Dismiss</button>
         </div>
       )}
 
       {/* Create form */}
       {creating && (
         <Card className="p-6 mb-6">
-          <h2 className="text-sm font-semibold text-slate-200 mb-4">Create API key pair</h2>
+          <h2 className="text-sm font-semibold text-ink mb-4">Create API key pair</h2>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-slate-300 block mb-1.5">Environment</label>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Environment</label>
               <div className="flex gap-2">
                 {(['test', 'live'] as const).map(e => (
                   <button key={e} onClick={() => setEnv(e)}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${env === e ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-white/4 border-white/10 text-slate-400'}`}>
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${env === e ? 'bg-forest-50 border-forest-300 text-forest-800' : 'bg-white border-sand-300 text-slate-500 hover:text-ink'}`}>
                     {e === 'test' ? 'Test' : 'Live'}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-300 block mb-1.5">Label (optional)</label>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Label (optional)</label>
               <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Production server"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-sand-300 text-sm text-ink placeholder-slate-400 caret-ink focus:outline-none focus:ring-2 focus:ring-forest-500/40" />
             </div>
             <p className="text-xs text-slate-500">This will create both a publishable (<code className="text-slate-400">pk_{env}_</code>) and secret (<code className="text-slate-400">sk_{env}_</code>) key pair.</p>
             <div className="flex gap-2">
@@ -128,19 +128,19 @@ export default function ApiKeysPage() {
           <div className="p-6 text-sm text-slate-500">Loading…</div>
         ) : keys.length === 0 ? (
           <div className="p-16 text-center">
-            <Key size={28} className="text-slate-700 mx-auto mb-3" />
+            <Key size={28} className="text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500 text-sm">No API keys yet</p>
           </div>
         ) : (
-          <div className="divide-y divide-white/6">
+          <div className="divide-y divide-sand-200/70">
             {keys.map(k => (
               <div key={k.id} className="flex items-center gap-4 px-6 py-4">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${k.type === 'secret' ? 'bg-red-500/8 border border-red-500/15' : 'bg-blue-500/8 border border-blue-500/15'}`}>
-                  <Key size={12} className={k.type === 'secret' ? 'text-red-400' : 'text-blue-400'} />
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${k.type === 'secret' ? 'bg-red-50 border border-red-200' : 'bg-forest-50 border border-forest-200'}`}>
+                  <Key size={12} className={k.type === 'secret' ? 'text-red-500' : 'text-forest-600'} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <code className="text-xs font-mono text-slate-300">{k.prefix}…{k.key_preview}</code>
+                    <code className="text-xs font-mono text-slate-600">{k.prefix}…{k.key_preview}</code>
                     <Badge variant={k.environment === 'live' ? 'error' : 'info'}>{k.environment}</Badge>
                     <Badge variant={k.type === 'secret' ? 'warning' : 'info'}>{k.type}</Badge>
                   </div>
@@ -150,7 +150,7 @@ export default function ApiKeysPage() {
                     {k.last_used_at && ` · Last used ${formatDate(k.last_used_at)}`}
                   </p>
                 </div>
-                <button onClick={() => { void revoke(k.id); }} className="text-slate-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/8 transition-all">
+                <button onClick={() => { void revoke(k.id); }} className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-all">
                   <Trash2 size={13} />
                 </button>
               </div>

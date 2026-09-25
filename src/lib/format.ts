@@ -13,14 +13,15 @@ export function formatDate(unixTs: number): string {
 
 export function getStatusColor(status: string): string {
   const map: Record<string, string> = {
-    succeeded: 'text-emerald-400 bg-emerald-400/10',
-    requires_payment: 'text-amber-400 bg-amber-400/10',
-    processing: 'text-blue-400 bg-blue-400/10',
-    failed: 'text-red-400 bg-red-400/10',
-    expired: 'text-slate-400 bg-slate-400/10',
-    cancelled: 'text-slate-400 bg-slate-400/10',
+    // Light fintech palette (presentation: status badge classes only).
+    succeeded: 'text-forest-700 bg-forest-100',
+    requires_payment: 'text-gold-700 bg-gold-100',
+    processing: 'text-teal-700 bg-teal-50',
+    failed: 'text-red-600 bg-red-50',
+    expired: 'text-slate-500 bg-sand-100',
+    cancelled: 'text-slate-500 bg-sand-100',
   };
-  return map[status] || 'text-slate-400 bg-slate-400/10';
+  return map[status] || 'text-slate-600 bg-sand-100';
 }
 
 export function getStatusLabel(status: string): string {

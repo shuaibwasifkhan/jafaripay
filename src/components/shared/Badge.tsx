@@ -5,13 +5,13 @@ interface Props { children: ReactNode; className?: string; variant?: 'default' |
 
 export function Badge({ children, className, variant = 'default' }: Props) {
   return (
-    <span className={clsx(
+        <span className={clsx(
       'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium tracking-wide',
-      variant === 'success' && 'text-emerald-400 bg-emerald-400/10',
-      variant === 'warning' && 'text-amber-400 bg-amber-400/10',
-      variant === 'error' && 'text-red-400 bg-red-400/10',
-      variant === 'info' && 'text-blue-400 bg-blue-400/10',
-      variant === 'default' && 'text-slate-400 bg-slate-400/10',
+      variant === 'success' && 'text-forest-700 bg-forest-100',
+      variant === 'warning' && 'text-gold-700 bg-gold-100',
+      variant === 'error' && 'text-red-600 bg-red-50',
+      variant === 'info' && 'text-teal-700 bg-teal-50',
+      variant === 'default' && 'text-slate-600 bg-sand-100',
       className
     )}>
       {children}

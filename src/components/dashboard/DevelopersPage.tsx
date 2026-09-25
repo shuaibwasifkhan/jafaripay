@@ -70,36 +70,36 @@ export default function DevelopersPage() {
   return (
     <div className="p-8 max-w-2xl">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Developers</h1>
-        <p className="text-slate-400 text-sm">Integration guides and API reference</p>
+        <h1 className="text-2xl font-bold text-ink tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Developers</h1>
+        <p className="text-slate-500 text-sm">Integration guides and API reference</p>
       </div>
 
       <div className="space-y-5">
         {/* Quick start */}
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-4">
-            <Code2 size={14} className="text-blue-400" />
-            <h2 className="text-sm font-semibold text-slate-200">Quick integration</h2>
+            <Code2 size={14} className="text-forest-600" />
+            <h2 className="text-sm font-semibold text-ink">Quick integration</h2>
           </div>
-          <p className="text-xs text-slate-400 mb-3">1. Create a payment intent on your backend using your <code className="text-slate-300">sk_test_</code> key:</p>
-          <pre className="p-4 bg-white/4 rounded-xl text-xs font-mono text-slate-300 overflow-x-auto">{NODEJS_EXAMPLE}</pre>
+          <p className="text-xs text-slate-500 mb-3">1. Create a payment intent on your backend using your <code className="text-forest-700">sk_test_</code> key:</p>
+          <pre className="p-4 bg-sand-100 rounded-xl text-xs font-mono text-slate-600 overflow-x-auto">{NODEJS_EXAMPLE}</pre>
 
-          <p className="text-xs text-slate-400 mt-5 mb-3">2. Open checkout on the frontend using the SDK:</p>
-          <pre className="p-4 bg-white/4 rounded-xl text-xs font-mono text-slate-300 overflow-x-auto">{SDK_EXAMPLE}</pre>
+          <p className="text-xs text-slate-500 mt-5 mb-3">2. Open checkout on the frontend using the SDK:</p>
+          <pre className="p-4 bg-sand-100 rounded-xl text-xs font-mono text-slate-600 overflow-x-auto">{SDK_EXAMPLE}</pre>
         </Card>
 
         {/* Webhook */}
         <Card className="p-6">
-          <h2 className="text-sm font-semibold text-slate-200 mb-1">Webhook verification</h2>
+          <h2 className="text-sm font-semibold text-ink mb-1">Webhook verification</h2>
           <p className="text-xs text-slate-500 mb-4">Use webhooks as your source of truth — never trust the frontend redirect.</p>
-          <pre className="p-4 bg-white/4 rounded-xl text-xs font-mono text-slate-300 overflow-x-auto">{WEBHOOK_EXAMPLE}</pre>
+          <pre className="p-4 bg-sand-100 rounded-xl text-xs font-mono text-slate-600 overflow-x-auto">{WEBHOOK_EXAMPLE}</pre>
         </Card>
 
         {/* Payment verification */}
         <Card className="p-6">
-          <h2 className="text-sm font-semibold text-slate-200 mb-1">Payment verification</h2>
+          <h2 className="text-sm font-semibold text-ink mb-1">Payment verification</h2>
           <p className="text-xs text-slate-500 mb-4">The backend independently verifies every ERC-20 Transfer event on Arc.</p>
-          <pre className="p-4 bg-white/4 rounded-xl text-xs font-mono text-slate-300 overflow-x-auto">{VERIFY_ENDPOINT}</pre>
+          <pre className="p-4 bg-sand-100 rounded-xl text-xs font-mono text-slate-600 overflow-x-auto">{VERIFY_ENDPOINT}</pre>
         </Card>
 
         {/* Docs links */}
@@ -111,7 +111,7 @@ export default function DevelopersPage() {
             { label: 'Test mode', to: '/docs#test-mode' },
           ].map(({ label, to }) => (
             <Link key={to} to={to}
-              className="flex items-center justify-between p-4 rounded-xl bg-white/4 border border-white/8 text-sm text-slate-300 hover:text-white hover:border-white/15 transition-all">
+              className="flex items-center justify-between p-4 rounded-xl bg-white border border-sand-200 text-sm text-slate-600 hover:text-ink hover:border-forest-300 shadow-soft transition-all">
               {label}
               <ArrowRight size={12} className="text-slate-500" />
             </Link>

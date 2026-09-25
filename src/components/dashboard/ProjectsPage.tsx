@@ -43,41 +43,41 @@ export default function ProjectsPage() {
     <div className="p-8 max-w-2xl">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Projects</h1>
-          <p className="text-slate-400 text-sm">Separate test and live environments per project</p>
+                    <h1 className="text-2xl font-bold text-ink tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Projects</h1>
+          <p className="text-slate-500 text-sm">Separate test and live environments per project</p>
         </div>
         <Button onClick={() => setCreating(true)} size="sm"><Plus size={14} /> New project</Button>
       </div>
 
       {creating && (
         <Card className="p-6 mb-6">
-          <h2 className="text-sm font-semibold text-slate-200 mb-4">New project</h2>
+                    <h2 className="text-sm font-semibold text-ink mb-4">New project</h2>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-slate-300 block mb-1.5">Project name</label>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Project name</label>
               <input value={name} onChange={e => setName(e.target.value)} placeholder="My Store"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-sand-300 text-sm text-ink placeholder-slate-400 caret-ink focus:outline-none focus:ring-2 focus:ring-forest-500/40" />
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-300 block mb-1.5">Description (optional)</label>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Description (optional)</label>
               <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="E-commerce store"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-white/10 text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40" />
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-sand-300 text-sm text-ink placeholder-slate-400 caret-ink focus:outline-none focus:ring-2 focus:ring-forest-500/40" />
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-300 block mb-1.5">Environment</label>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Environment</label>
               <div className="flex gap-2">
                 {(['test', 'live'] as const).map(e => (
                   <button key={e} onClick={() => setEnv(e)}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${env === e ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-white/4 border-white/10 text-slate-400'}`}>
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${env === e ? 'bg-forest-50 border-forest-300 text-forest-800' : 'bg-white border-sand-300 text-slate-500 hover:text-ink'}`}>
                     {e === 'test' ? 'Test' : 'Live'}
                   </button>
                 ))}
               </div>
             </div>
             {env === 'live' && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/6 border border-amber-500/15">
-                <AlertCircle size={12} className="text-amber-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-300">Live projects process real USDC on Arc Mainnet. Make sure <code>ENABLE_LIVE_PAYMENTS=true</code> is set in production.</p>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-gold-50 border border-gold-200">
+                <AlertCircle size={12} className="text-gold-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-gold-800">Live projects process real USDC on Arc Mainnet. Make sure <code>ENABLE_LIVE_PAYMENTS=true</code> is set in production.</p>
               </div>
             )}
             <div className="flex gap-2">
@@ -93,26 +93,26 @@ export default function ProjectsPage() {
           <div className="p-6 text-sm text-slate-500">Loading…</div>
         ) : projects.length === 0 ? (
           <div className="p-16 text-center">
-            <Layers size={28} className="text-slate-700 mx-auto mb-3" />
+            <Layers size={28} className="text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500 text-sm">No projects yet</p>
-            <p className="text-xs text-slate-600 mt-1">Create a project to organize your API keys and payments</p>
+            <p className="text-xs text-slate-400 mt-1">Create a project to organize your API keys and payments</p>
           </div>
         ) : (
-          <div className="divide-y divide-white/6">
+          <div className="divide-y divide-sand-200/70">
             {projects.map(p => (
               <div key={p.id} className="flex items-center gap-4 px-6 py-4">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                  <Layers size={14} className="text-blue-400" />
+                <div className="w-9 h-9 rounded-xl bg-lilac-50 flex items-center justify-center flex-shrink-0">
+                  <Layers size={14} className="text-lilac-600" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-slate-200">{p.name}</p>
+                    <p className="text-sm font-semibold text-ink">{p.name}</p>
                     <Badge variant={p.environment === 'live' ? 'error' : 'info'}>{p.environment}</Badge>
                   </div>
                   {p.description && <p className="text-xs text-slate-500 mt-0.5">{p.description}</p>}
-                  <p className="text-xs text-slate-600 mt-0.5">Created {formatDate(p.created_at)}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Created {formatDate(p.created_at)}</p>
                 </div>
-                <p className="text-xs font-mono text-slate-600">{p.id.slice(0, 12)}…</p>
+                <p className="text-xs font-mono text-slate-400">{p.id.slice(0, 12)}…</p>
               </div>
             ))}
           </div>

@@ -14,14 +14,14 @@ export function Button({ children, variant = 'primary', size = 'md', loading, cl
       {...rest}
       disabled={disabled || loading}
       className={clsx(
-        'inline-flex items-center justify-center gap-2 font-medium rounded-xl transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center gap-2 font-medium rounded-xl transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-forest-400/50 disabled:opacity-50 disabled:cursor-not-allowed',
         size === 'sm' && 'px-3 py-1.5 text-sm',
         size === 'md' && 'px-4 py-2.5 text-sm',
         size === 'lg' && 'px-6 py-3.5 text-base',
-        variant === 'primary' && 'bg-[#0a0f1e] text-white hover:bg-[#0d1529] active:bg-[#060b18]',
-        variant === 'secondary' && 'bg-white/8 text-slate-200 border border-white/10 hover:bg-white/12',
-        variant === 'ghost' && 'text-slate-400 hover:text-slate-200 hover:bg-white/6',
-        variant === 'danger' && 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20',
+        variant === 'primary' && 'bg-forest-700 text-white hover:bg-forest-600 active:bg-forest-800 shadow-soft',
+        variant === 'secondary' && 'bg-white text-ink border border-sand-300 hover:bg-cream hover:border-sand-400',
+        variant === 'ghost' && 'text-slate-500 hover:text-ink hover:bg-sand-100',
+        variant === 'danger' && 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100',
         className
       )}
     >

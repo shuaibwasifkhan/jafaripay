@@ -35,22 +35,22 @@ export default function PaymentsPage() {
   return (
     <div className="p-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Payments</h1>
-        <p className="text-slate-400 text-sm">{total.toLocaleString()} total payments</p>
+                <h1 className="text-2xl font-bold text-ink tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Payments</h1>
+        <p className="text-slate-500 text-sm">{total.toLocaleString()} total payments</p>
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
         {STATUSES.map(s => (
           <button key={s} onClick={() => changeStatus(s)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all capitalize ${status === s ? 'bg-white/10 border-white/20 text-white' : 'bg-white/4 border-white/8 text-slate-500 hover:text-slate-200'}`}>
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all capitalize ${status === s ? 'bg-forest-700 text-white border-forest-700 shadow-soft' : 'bg-white text-slate-500 border-sand-300 hover:text-ink hover:border-sand-400'}`}>
             {s === 'all' ? 'All' : s.replace('_', ' ')}
           </button>
         ))}
       </div>
 
       <Card>
-        <div className="px-5 py-3 border-b border-white/8 grid grid-cols-12 text-xs font-medium text-slate-500 uppercase tracking-wider">
+        <div className="px-5 py-3 border-b border-sand-200 grid grid-cols-12 text-xs font-medium text-slate-500 uppercase tracking-wider">
           <span className="col-span-3">Payment Intent</span>
           <span className="col-span-2">Order</span>
           <span className="col-span-2 text-right">Amount</span>
@@ -63,24 +63,24 @@ export default function PaymentsPage() {
           <div className="p-8 text-sm text-slate-500">Loading…</div>
         ) : payments.length === 0 ? (
           <div className="p-16 text-center">
-            <CreditCard size={28} className="text-slate-700 mx-auto mb-3" />
+            <CreditCard size={28} className="text-slate-300 mx-auto mb-3" />
             <p className="text-sm text-slate-500">No payments found</p>
           </div>
         ) : (
-          <div className="divide-y divide-white/6">
+          <div className="divide-y divide-sand-200/70">
             {payments.map(p => (
               <Link key={p.id} to={`/dashboard/payments/${p.id}`}
-                className="grid grid-cols-12 items-center px-5 py-3.5 hover:bg-white/3 transition-all">
-                <span className="col-span-3 text-xs font-mono text-slate-400 truncate pr-4">{p.payment_intent_id}</span>
-                <span className="col-span-2 text-xs text-slate-500 truncate pr-4">{p.order_id || '—'}</span>
-                <span className="col-span-2 text-sm font-semibold text-white tabular-nums text-right pr-4">{formatUSDC(p.amount)}</span>
+                className="grid grid-cols-12 items-center px-5 py-3.5 hover:bg-cream transition-all">
+                <span className="col-span-3 text-xs font-mono text-slate-500 truncate pr-4">{p.payment_intent_id}</span>
+                <span className="col-span-2 text-xs text-slate-400 truncate pr-4">{p.order_id || '—'}</span>
+                <span className="col-span-2 text-sm font-semibold text-ink tabular-nums text-right pr-4">{formatUSDC(p.amount)}</span>
                 <span className="col-span-2 text-center">
                   <Badge className={getStatusColor(p.status)}>{getStatusLabel(p.status)}</Badge>
                 </span>
                 <span className="col-span-1 text-center">
                   <Badge variant={p.environment === 'live' ? 'error' : 'info'}>{p.environment}</Badge>
                 </span>
-                <span className="col-span-2 text-xs text-slate-600 text-right">{formatDate(p.created_at)}</span>
+                <span className="col-span-2 text-xs text-slate-500 text-right">{formatDate(p.created_at)}</span>
               </Link>
             ))}
           </div>
@@ -88,15 +88,15 @@ export default function PaymentsPage() {
 
         {/* Pagination */}
         {total > PAGE_SIZE && (
-          <div className="px-6 py-3 border-t border-white/8 flex items-center justify-between">
+          <div className="px-6 py-3 border-t border-sand-200 flex items-center justify-between">
             <p className="text-xs text-slate-500">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}</p>
             <div className="flex gap-2">
               <button disabled={page === 0} onClick={() => setPage(p => p - 1)}
-                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white/6 text-slate-300 border border-white/10 disabled:opacity-40 hover:bg-white/10 transition-all">
+                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white text-slate-600 border border-sand-300 disabled:opacity-40 hover:bg-cream transition-all">
                 Previous
               </button>
               <button disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(p => p + 1)}
-                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white/6 text-slate-300 border border-white/10 disabled:opacity-40 hover:bg-white/10 transition-all">
+                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white text-slate-600 border border-sand-300 disabled:opacity-40 hover:bg-cream transition-all">
                 Next
               </button>
             </div>

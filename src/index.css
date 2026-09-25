@@ -2,14 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --jp-bg: #FAF8F3;          /* warm cream page background */
+  --jp-surface: #ffffff;      /* cards & panels */
+  --jp-ink: #1B2420;         /* deep charcoal text */
+  --jp-border: #D8D1C3;      /* very light warm gray */
+  --jp-ring: #3B8368;        /* forest-500 focus/emerald accent */
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, sans-serif;
   min-height: 100dvh;
+  background: var(--jp-bg);
+  color: var(--jp-ink);
+  font-family: "DM Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  ::selection { background: #D9EAE1; color: #265845; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #C7B9A6; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
 }
 
 /* ── Editable field polish (surgical visual pass) ─────────────────────────────

@@ -93,17 +93,17 @@ export default function WebhooksPage() {
     <div className="p-8 max-w-2xl">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Webhooks</h1>
-          <p className="text-slate-400 text-sm">Receive signed events when payments change state</p>
+          <h1 className="text-2xl font-bold text-ink tracking-tight mb-1" style={{ letterSpacing: '-0.02em' }}>Webhooks</h1>
+          <p className="text-slate-500 text-sm">Receive signed events when payments change state</p>
         </div>
         {tab === 'endpoints' && <Button onClick={() => setCreating(true)} size="sm"><Plus size={14} /> Add endpoint</Button>}
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-white/4 p-1 rounded-xl w-fit">
+      <div className="flex gap-1 mb-6 bg-sand-100 p-1 rounded-xl w-fit">
         {(['endpoints', 'deliveries'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium capitalize transition-all ${tab === t ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-200'}`}>
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium capitalize transition-all ${tab === t ? 'bg-white text-ink shadow-soft' : 'text-slate-500 hover:text-ink'}`}>
             {t}
           </button>
         ))}
@@ -113,32 +113,32 @@ export default function WebhooksPage() {
         <>
           {creating && (
             <Card className="p-6 mb-6">
-              <h2 className="text-sm font-semibold text-slate-200 mb-4">New webhook endpoint</h2>
+              <h2 className="text-sm font-semibold text-ink mb-4">New webhook endpoint</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-slate-300 block mb-1.5">Endpoint URL</label>
+                  <label className="text-sm font-medium text-slate-600 block mb-1.5">Endpoint URL</label>
                   <input value={url} onChange={e => { setUrl(e.target.value); validateUrl(e.target.value); }}
                     placeholder="https://yourapp.com/webhooks/jafaripay"
-                    className={`w-full px-3.5 py-2.5 rounded-xl bg-white border text-sm text-black placeholder-slate-500 caret-black focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${urlError ? 'border-red-500/50' : 'border-white/10'}`} />
-                  {urlError && <p className="text-xs text-red-400 mt-1">{urlError}</p>}
+                    className={`w-full px-3.5 py-2.5 rounded-xl bg-white border text-sm text-ink placeholder-slate-400 caret-ink focus:outline-none focus:ring-2 focus:ring-forest-500/40 ${urlError ? 'border-red-300' : 'border-sand-300'}`} />
+                  {urlError && <p className="text-xs text-red-600 mt-1">{urlError}</p>}
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-300 block mb-2">Events to send</label>
+                  <label className="text-sm font-medium text-slate-600 block mb-2">Events to send</label>
                   <div className="space-y-2">
                     {EVENT_TYPES.map(e => (
                       <label key={e} className="flex items-center gap-2.5 cursor-pointer">
                         <input type="checkbox" checked={selectedEvents.includes(e)}
                           onChange={ev => setSelectedEvents(p => ev.target.checked ? [...p, e] : p.filter(x => x !== e))}
-                          className="accent-blue-500" />
-                        <code className="text-xs text-slate-300">{e}</code>
-                        {e === 'payment.succeeded' && <span className="text-xs text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded-md">recommended</span>}
+                          className="accent-forest-600" />
+                        <code className="text-xs text-slate-600">{e}</code>
+                        {e === 'payment.succeeded' && <span className="text-xs text-gold-700 bg-gold-100 px-1.5 py-0.5 rounded-md">recommended</span>}
                       </label>
                     ))}
                   </div>
                 </div>
-                <div className="flex items-start gap-2 p-3 rounded-xl bg-blue-500/6 border border-blue-500/15">
-                  <AlertCircle size={12} className="text-blue-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-blue-400/80">A webhook signing secret will be generated. Verify HMAC-SHA256 signatures on every delivery. See the Developers tab for example code.</p>
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-forest-50 border border-forest-200">
+                  <AlertCircle size={12} className="text-forest-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-forest-700/80">A webhook signing secret will be generated. Verify HMAC-SHA256 signatures on every delivery. See the Developers tab for example code.</p>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={() => { void create(); }} loading={saving} className="flex-1">Create endpoint</Button>
@@ -153,25 +153,25 @@ export default function WebhooksPage() {
               <div className="p-6 text-sm text-slate-500">Loading…</div>
             ) : endpoints.length === 0 ? (
               <div className="p-16 text-center">
-                <Webhook size={28} className="text-slate-700 mx-auto mb-3" />
+                <Webhook size={28} className="text-slate-300 mx-auto mb-3" />
                 <p className="text-slate-500 text-sm">No webhook endpoints</p>
               </div>
             ) : (
-              <div className="divide-y divide-white/6">
+              <div className="divide-y divide-sand-200/70">
                 {endpoints.map(ep => (
                   <div key={ep.id} className="px-6 py-4">
                     <div className="flex items-start gap-4">
-                      <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${ep.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                      <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${ep.enabled ? 'bg-forest-500' : 'bg-slate-300'}`} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-200 font-medium truncate">{ep.url}</p>
+                        <p className="text-sm text-ink font-medium truncate">{ep.url}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {(JSON.parse(ep.events) as string[]).join(', ')}
                         </p>
-                        <p className="text-xs text-slate-600 mt-0.5">
-                          Secret: <code className="text-slate-500">…{ep.secret_preview}</code> · Created {formatDate(ep.created_at)}
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Secret: <code className="text-slate-400">…{ep.secret_preview}</code> · Created {formatDate(ep.created_at)}
                         </p>
                       </div>
-                      <button onClick={() => { void deleteEndpoint(ep.id); }} className="text-slate-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/8 transition-all">
+                      <button onClick={() => { void deleteEndpoint(ep.id); }} className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-all">
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -189,22 +189,22 @@ export default function WebhooksPage() {
             <div className="p-6 text-sm text-slate-500">Loading…</div>
           ) : deliveries.length === 0 ? (
             <div className="p-16 text-center">
-              <Webhook size={28} className="text-slate-700 mx-auto mb-3" />
+              <Webhook size={28} className="text-slate-300 mx-auto mb-3" />
               <p className="text-slate-500 text-sm">No webhook deliveries</p>
             </div>
           ) : (
-            <div className="divide-y divide-white/6">
+            <div className="divide-y divide-sand-200/70">
               {deliveries.map(d => (
                 <div key={d.id} className="flex items-center gap-4 px-6 py-3.5">
                   {d.status === 'delivered'
-                    ? <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                    ? <CheckCircle size={14} className="text-forest-600 flex-shrink-0" />
                     : d.status === 'failed'
-                      ? <XCircle size={14} className="text-red-400 flex-shrink-0" />
-                      : <AlertCircle size={14} className="text-amber-400 flex-shrink-0" />
+                      ? <XCircle size={14} className="text-red-500 flex-shrink-0" />
+                      : <AlertCircle size={14} className="text-gold-600 flex-shrink-0" />
                   }
                   <div className="flex-1 min-w-0">
-                    <code className="text-xs text-slate-300">{d.event_type}</code>
-                    <p className="text-xs text-slate-600 mt-0.5">
+                    <code className="text-xs text-slate-600">{d.event_type}</code>
+                    <p className="text-xs text-slate-500 mt-0.5">
                       Attempt {d.attempts} · {formatDate(d.created_at)}
                       {d.next_retry_at && d.status !== 'delivered' && ` · Retry at ${formatDate(d.next_retry_at)}`}
                     </p>
@@ -213,7 +213,7 @@ export default function WebhooksPage() {
                     {d.status}
                   </Badge>
                   {d.status === 'failed' && (
-                    <button onClick={() => { void retry(d.id); }} className="text-slate-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-blue-500/8 transition-all">
+                    <button onClick={() => { void retry(d.id); }} className="text-slate-500 hover:text-forest-700 p-1.5 rounded-lg hover:bg-forest-50 transition-all">
                       <RotateCcw size={12} />
                     </button>
                   )}

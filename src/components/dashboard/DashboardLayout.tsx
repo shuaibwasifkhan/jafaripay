@@ -36,12 +36,12 @@ export default function DashboardLayout() {
   if (loading || !merchant) return null;
 
   return (
-    <div className="min-h-dvh bg-[#080d1a] flex" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="min-h-dvh bg-cream flex" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       {/* Sidebar */}
-      <aside className="w-60 bg-[#0a0f1e] border-r border-white/6 flex flex-col flex-shrink-0">
+      <aside className="w-60 bg-forest-950 border-r border-forest-800/50 flex flex-col flex-shrink-0">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 px-5 py-5 border-b border-white/6">
-          <div className="w-7 h-7 rounded-xl bg-blue-500 flex items-center justify-center">
+        <Link to="/" className="flex items-center gap-2 px-5 py-5 border-b border-forest-800/50">
+          <div className="w-7 h-7 rounded-xl bg-forest-600 flex items-center justify-center">
             <Zap size={12} fill="white" className="text-white" />
           </div>
           <span className="font-bold text-white text-sm tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>JafariPay</span>
@@ -56,13 +56,13 @@ export default function DashboardLayout() {
               end={exact}
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-all ${
-                  isActive ? 'bg-white/8 text-white font-medium' : 'text-slate-500 hover:text-slate-200 hover:bg-white/4'
+                  isActive ? 'bg-white/12 text-white font-medium' : 'text-forest-200 hover:text-white hover:bg-white/4'
                 }`
               }
             >
               {({ isActive }) => (
                 <>
-                  <Icon size={14} className={isActive ? 'text-blue-400' : 'text-slate-500'} />
+                  <Icon size={14} className={isActive ? 'text-gold-300' : 'text-forest-200'} />
                   {label}
                 </>
               )}
@@ -71,18 +71,18 @@ export default function DashboardLayout() {
         </nav>
 
         {/* Merchant identity */}
-        <div className="border-t border-white/6 p-3">
-          <div className="flex items-center gap-2.5 p-2.5 rounded-xl hover:bg-white/4 transition-all group cursor-default">
-            <div className="w-7 h-7 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
-              <span className="text-xs font-bold text-blue-400">{merchant.wallet_address.slice(2, 4).toUpperCase()}</span>
+        <div className="border-t border-forest-800/50 p-3">
+          <div className="flex items-center gap-2.5 p-2.5 rounded-xl hover:bg-forest-700/40 transition-all group cursor-default">
+            <div className="w-7 h-7 rounded-xl bg-gold-400/20 flex items-center justify-center flex-shrink-0">
+              <span className="text-xs font-bold text-gold-300">{merchant.wallet_address.slice(2, 4).toUpperCase()}</span>
             </div>
             <div className="flex-1 min-w-0">
-              {merchant.name && <p className="text-xs font-medium text-slate-200 truncate">{merchant.name}</p>}
-              <p className="text-xs font-mono text-slate-500 truncate">{formatAddress(merchant.wallet_address)}</p>
+              {merchant.name && <p className="text-xs font-medium text-forest-100 truncate">{merchant.name}</p>}
+              <p className="text-xs font-mono text-forest-300 truncate">{formatAddress(merchant.wallet_address)}</p>
             </div>
           </div>
           <button onClick={() => { void handleLogout(); }}
-            className="flex items-center gap-2 w-full px-3 py-2 rounded-xl text-sm text-slate-600 hover:text-red-400 hover:bg-red-500/6 transition-all mt-1">
+            className="flex items-center gap-2 w-full px-3 py-2 rounded-xl text-sm text-forest-300 hover:text-red-400 hover:bg-red-500/10 transition-all mt-1">
             <LogOut size={13} /> Sign out
           </button>
         </div>

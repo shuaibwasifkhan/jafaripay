@@ -83,41 +83,41 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-dvh bg-[#080d1a] flex items-center justify-center p-6" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="min-h-dvh bg-cream flex items-center justify-center p-6" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <div className="w-full max-w-sm">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 justify-center mb-10">
-          <div className="w-9 h-9 rounded-2xl bg-blue-500 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-2xl bg-forest-600 flex items-center justify-center">
             <Zap size={16} fill="white" className="text-white" />
           </div>
-          <span className="font-bold text-white text-xl tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>JafariPay</span>
+          <span className="font-bold text-ink text-xl tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>JafariPay</span>
         </Link>
 
         {/* Card */}
-        <div className="bg-[#0d1225] rounded-2xl border border-white/8 p-8">
+        <div className="bg-white rounded-2xl border border-sand-200 shadow-lift p-8">
           <div className="text-center mb-8">
-            <h1 className="text-xl font-bold text-white mb-2" style={{ letterSpacing: '-0.02em', fontFamily: "'Space Grotesk', sans-serif" }}>
+            <h1 className="text-xl font-bold text-ink mb-2" style={{ letterSpacing: '-0.02em', fontFamily: "'Space Grotesk', sans-serif" }}>
               Sign in to JafariPay
             </h1>
-            <p className="text-sm text-slate-400 text-pretty">Connect your wallet to access your merchant dashboard</p>
+            <p className="text-sm text-slate-500 text-pretty">Connect your wallet to access your merchant dashboard</p>
           </div>
 
           {/* Connect wallet step */}
           <div className="space-y-4">
             {!isConnected ? (
               <div className="flex flex-col items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center">
-                  <Wallet size={20} className="text-slate-400" />
+                <div className="w-12 h-12 rounded-2xl bg-sand-100 border border-sand-200 flex items-center justify-center">
+                  <Wallet size={20} className="text-slate-500" />
                 </div>
                 <div className="text-center mb-2">
-                  <p className="text-sm font-medium text-slate-200 mb-1">Step 1: Connect your wallet</p>
+                  <p className="text-sm font-medium text-ink mb-1">Step 1: Connect your wallet</p>
                   <p className="text-xs text-slate-500">Use MetaMask or any EIP-1193 compatible wallet</p>
                 </div>
                 <ConnectKitButton.Custom>
                   {({ show }) => (
                     <button
                       onClick={show}
-                      className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-white text-[#080d1a] font-semibold text-sm hover:bg-slate-100 transition-all"
+                      className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-forest-700 text-white font-semibold text-sm hover:bg-forest-600 shadow-soft transition-all"
                     >
                       <Wallet size={15} /> Connect Wallet
                     </button>
@@ -126,20 +126,20 @@ export default function AuthPage() {
               </div>
             ) : (
               <div className="flex flex-col items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <ShieldCheck size={20} className="text-emerald-400" />
+                <div className="w-12 h-12 rounded-2xl bg-forest-50 border border-forest-200 flex items-center justify-center">
+                  <ShieldCheck size={20} className="text-forest-600" />
                 </div>
                 <div className="text-center mb-1">
-                  <p className="text-sm font-medium text-slate-200 mb-1">Step 2: Sign in message</p>
+                  <p className="text-sm font-medium text-ink mb-1">Step 2: Sign in message</p>
                   <p className="text-xs font-mono text-slate-500 break-all">{address?.slice(0, 6)}...{address?.slice(-4)}</p>
-                  <p className="text-xs text-slate-600 mt-1.5">No transaction, no gas. Read-only proof of ownership.</p>
+                  <p className="text-xs text-slate-500 mt-1.5">No transaction, no gas. Read-only proof of ownership.</p>
                 </div>
                 <Button onClick={() => { void handleAuth(); }} loading={signing} className="w-full" size="lg">
                   Sign in with wallet
                 </Button>
                 <button
                   onClick={() => { disconnect(); }}
-                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2"
+                  className="text-xs text-slate-500 hover:text-ink transition-colors underline underline-offset-2"
                 >
                   Use a different wallet
                 </button>
@@ -147,9 +147,9 @@ export default function AuthPage() {
             )}
 
             {error && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/8 border border-red-500/15">
-                <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-red-300">{error}</p>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200">
+                <AlertCircle size={13} className="text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-700">{error}</p>
               </div>
             )}
           </div>

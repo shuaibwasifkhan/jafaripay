@@ -206,41 +206,41 @@ export default function CheckoutPage() {
   void chain;
 
   return (
-    <div className="min-h-dvh bg-[#080d1a] flex items-center justify-center px-4 py-12">
+        <div className="min-h-dvh bg-cream flex items-center justify-center px-4 py-12">
       {/* Background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-24 -right-24 w-96 h-96 bg-blue-500/6 rounded-full blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-indigo-500/6 rounded-full blur-3xl" />
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-forest-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-lilac-500/10 rounded-full blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-sm">
         {/* Logo */}
         <div className="flex items-center gap-2 justify-center mb-8">
-          <div className="w-8 h-8 rounded-xl bg-blue-500 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-xl bg-forest-600 flex items-center justify-center">
             <Zap size={13} fill="white" className="text-white" />
           </div>
-          <span className="font-bold text-white text-base tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>JafariPay</span>
+          <span className="font-bold text-ink text-base tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>JafariPay</span>
         </div>
 
         {/* Card */}
-        <div className="bg-[#0d1225] rounded-2xl border border-white/8 overflow-hidden shadow-2xl">
+        <div className="bg-white rounded-2xl border border-sand-200 overflow-hidden shadow-lift">
           {/* Header */}
-          <div className="p-6 border-b border-white/6">
+          <div className="p-6 border-b border-sand-200">
             {step === 'loading' ? (
               <div className="flex items-center justify-center h-16">
-                <Loader2 className="animate-spin text-blue-500" size={20} />
+                <Loader2 className="animate-spin text-forest-600" size={20} />
               </div>
             ) : intent ? (
               <>
                 <p className="text-xs text-slate-500 mb-1">{intent.merchant_name || 'Merchant'}</p>
-                <p className="text-3xl font-bold text-white tabular-nums" style={{ letterSpacing: '-0.02em', fontFamily: "'Space Grotesk', sans-serif" }}>
+                <p className="text-3xl font-bold text-ink tabular-nums" style={{ letterSpacing: '-0.02em', fontFamily: "'Space Grotesk', sans-serif" }}>
                   {formatUSDC(intent.amount)} USDC
                 </p>
-                {intent.description && <p className="text-sm text-slate-400 mt-1">{intent.description}</p>}
+                {intent.description && <p className="text-sm text-slate-600 mt-1">{intent.description}</p>}
                 {intent.order_id && <p className="text-xs text-slate-500 mt-0.5">Order: {intent.order_id}</p>}
                 <div className="flex items-center gap-1.5 mt-3">
-                  <span className="w-2 h-2 rounded-full bg-blue-400" />
-                  <span className="text-xs text-slate-400">{networkName} · USDC</span>
+                  <span className="w-2 h-2 rounded-full bg-forest-500" />
+                  <span className="text-xs text-slate-500">{networkName} · USDC</span>
                 </div>
               </>
             ) : null}
@@ -251,16 +251,16 @@ export default function CheckoutPage() {
             {/* Succeeded */}
             {step === 'succeeded' && (
               <div className="flex flex-col items-center gap-3 py-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
-                  <CheckCircle size={24} className="text-emerald-400" />
+                <div className="w-14 h-14 rounded-2xl bg-forest-100 flex items-center justify-center">
+                  <CheckCircle size={24} className="text-forest-600" />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-bold text-white mb-1">Payment complete</p>
-                  <p className="text-xs text-slate-400">USDC received and verified on-chain</p>
+                  <p className="text-lg font-bold text-ink mb-1">Payment complete</p>
+                  <p className="text-xs text-slate-500">USDC received and verified on-chain</p>
                 </div>
                 {txHash && explorerTx && (
                   <a href={explorerTx} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300">
+                    className="flex items-center gap-1.5 text-xs text-forest-700 hover:text-forest-800">
                     <ExternalLink size={11} /> View transaction
                   </a>
                 )}
@@ -270,12 +270,12 @@ export default function CheckoutPage() {
             {/* Failed */}
             {step === 'failed' && (
               <div className="flex flex-col items-center gap-3 py-4">
-                <div className="w-14 h-14 rounded-2xl bg-red-500/10 flex items-center justify-center">
-                  <AlertCircle size={24} className="text-red-400" />
+                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
+                  <AlertCircle size={24} className="text-red-500" />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-bold text-white mb-1">Payment failed</p>
-                  <p className="text-xs text-slate-400">{verifyError ?? 'Something went wrong'}</p>
+                  <p className="text-lg font-bold text-ink mb-1">Payment failed</p>
+                  <p className="text-xs text-slate-500">{verifyError ?? 'Something went wrong'}</p>
                 </div>
               </div>
             )}
@@ -283,12 +283,12 @@ export default function CheckoutPage() {
             {/* Expired / Cancelled */}
             {(step === 'expired' || step === 'cancelled') && (
               <div className="flex flex-col items-center gap-3 py-4">
-                <div className="w-14 h-14 rounded-2xl bg-slate-500/10 flex items-center justify-center">
+                <div className="w-14 h-14 rounded-2xl bg-sand-100 flex items-center justify-center">
                   <Clock size={24} className="text-slate-400" />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-bold text-white mb-1">{step === 'expired' ? 'Payment expired' : 'Payment cancelled'}</p>
-                  <p className="text-xs text-slate-400">This payment link is no longer active.</p>
+                  <p className="text-lg font-bold text-ink mb-1">{step === 'expired' ? 'Payment expired' : 'Payment cancelled'}</p>
+                  <p className="text-xs text-slate-500">This payment link is no longer active.</p>
                 </div>
               </div>
             )}
@@ -296,13 +296,13 @@ export default function CheckoutPage() {
             {/* Verifying */}
             {step === 'verifying' && (
               <div className="flex flex-col items-center gap-3 py-4">
-                <Loader2 className="animate-spin text-blue-500" size={24} />
+                <Loader2 className="animate-spin text-forest-600" size={24} />
                 <div className="text-center">
-                  <p className="text-sm font-semibold text-white mb-1">Verifying payment</p>
-                  <p className="text-xs text-slate-400">Confirming on-chain transfer…</p>
+                  <p className="text-sm font-semibold text-ink mb-1">Verifying payment</p>
+                  <p className="text-xs text-slate-500">Confirming on-chain transfer…</p>
                   {txHash && explorerTx && (
                     <a href={explorerTx} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 mt-2">
+                      className="flex items-center justify-center gap-1.5 text-xs text-forest-700 hover:text-forest-800 mt-2">
                       <ExternalLink size={11} /> View on explorer
                     </a>
                   )}
@@ -313,13 +313,13 @@ export default function CheckoutPage() {
             {/* Confirming onchain */}
             {step === 'confirming' && (
               <div className="flex flex-col items-center gap-3 py-4">
-                <Loader2 className="animate-spin text-blue-500" size={24} />
+                <Loader2 className="animate-spin text-forest-600" size={24} />
                 <div className="text-center">
-                  <p className="text-sm font-semibold text-white mb-1">Waiting for confirmation</p>
-                  <p className="text-xs text-slate-400">Transaction submitted — waiting for block…</p>
+                  <p className="text-sm font-semibold text-ink mb-1">Waiting for confirmation</p>
+                  <p className="text-xs text-slate-500">Transaction submitted — waiting for block…</p>
                   {txHash && explorerTx && (
                     <a href={explorerTx} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 mt-2">
+                      className="flex items-center justify-center gap-1.5 text-xs text-forest-700 hover:text-forest-800 mt-2">
                       <ExternalLink size={11} /> View on explorer
                     </a>
                   )}
@@ -332,13 +332,13 @@ export default function CheckoutPage() {
               <>
                 {/* Expiry */}
                 {expirySecs !== null && expirySecs > 0 && expirySecs < 600 && (
-                  <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-2 text-xs text-gold-700 bg-gold-50 border border-gold-200 rounded-xl px-3 py-2">
                     <Clock size={11} />
                     Expires in {Math.floor(expirySecs / 60)}m {expirySecs % 60}s
                   </div>
                 )}
                 {isExpired && (
-                  <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/8 border border-red-500/15 rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
                     <AlertCircle size={11} /> This payment has expired
                   </div>
                 )}
@@ -348,7 +348,7 @@ export default function CheckoutPage() {
                   <ConnectKitButton.Custom>
                     {({ show }) => (
                       <button onClick={show}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-white text-[#080d1a] font-semibold text-sm hover:bg-slate-100 transition-all">
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-forest-700 text-white font-semibold text-sm hover:bg-forest-600 shadow-soft transition-all">
                         Connect Wallet to Pay
                       </button>
                     )}
@@ -356,17 +356,17 @@ export default function CheckoutPage() {
                 ) : (
                   <div className="space-y-3">
                     {/* Connected wallet info */}
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-white/4 border border-white/6">
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-sand-100 border border-sand-200">
                       <div>
                         <p className="text-xs text-slate-500 mb-0.5">Connected wallet</p>
-                        <p className="text-sm font-mono text-slate-200">{formatAddress(address!)}</p>
+                        <p className="text-sm font-mono text-slate-700">{formatAddress(address!)}</p>
                         {formattedBalance !== null && (
                           <p className="text-xs text-slate-500 mt-0.5">{formattedBalance} USDC</p>
                         )}
                       </div>
                       <ConnectKitButton.Custom>
                         {({ show }) => (
-                          <button onClick={show} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                          <button onClick={show} className="text-xs text-slate-500 hover:text-ink transition-colors">
                             Change
                           </button>
                         )}
@@ -375,15 +375,15 @@ export default function CheckoutPage() {
 
                     {/* Wrong network warning */}
                     {isWrongChain && (
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/8 border border-amber-500/15">
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-gold-50 border border-gold-200">
                         <div className="flex items-center gap-2">
-                          <AlertCircle size={13} className="text-amber-400" />
-                          <p className="text-xs text-amber-300">Switch to {networkName}</p>
+                          <AlertCircle size={13} className="text-gold-600" />
+                          <p className="text-xs text-gold-800">Switch to {networkName}</p>
                         </div>
                         <button
                           onClick={() => switchChain({ chainId })}
                           disabled={isSwitching}
-                          className="text-xs font-medium text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
+                          className="text-xs font-medium text-gold-700 hover:text-gold-800 disabled:opacity-50 transition-colors"
                         >
                           {isSwitching ? 'Switching…' : 'Switch'}
                         </button>
@@ -391,13 +391,13 @@ export default function CheckoutPage() {
                     )}
 
                     {/* Settlement address */}
-                    <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/3 border border-white/5">
+                    <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-sand-100/60 border border-sand-200">
                       <p className="text-xs text-slate-500">Sending to</p>
                       <div className="flex items-center gap-1.5">
-                        <p className="text-xs font-mono text-slate-400">{formatAddress(intent.settlement_address)}</p>
+                        <p className="text-xs font-mono text-slate-600">{formatAddress(intent.settlement_address)}</p>
                         {explorerSettlement && (
                           <a href={explorerSettlement} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink size={10} className="text-slate-600 hover:text-slate-400" />
+                            <ExternalLink size={10} className="text-slate-400 hover:text-ink" />
                           </a>
                         )}
                       </div>
@@ -410,10 +410,10 @@ export default function CheckoutPage() {
                       className={clsx(
                         'w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-semibold text-sm transition-all',
                         isWrongChain || isExpired
-                          ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                          ? 'bg-sand-300 text-slate-400 cursor-not-allowed'
                           : step === 'wallet-sign' || isWalletPending
-                          ? 'bg-blue-600/60 text-white/60 cursor-wait'
-                          : 'bg-blue-600 hover:bg-blue-500 text-white active:scale-[0.98]'
+                          ? 'bg-forest-600/50 text-white/70 cursor-wait'
+                          : 'bg-forest-700 hover:bg-forest-600 text-white active:scale-[0.98] shadow-soft'
                       )}
                     >
                       {step === 'wallet-sign' || isWalletPending
@@ -427,7 +427,7 @@ export default function CheckoutPage() {
 
             {/* Security note */}
             {(step === 'ready' || step === 'wallet-sign') && (
-              <div className="flex items-center gap-2 text-xs text-slate-600">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
                 <Shield size={11} />
                 Non-custodial. USDC goes directly to merchant. JafariPay never holds funds.
               </div>
