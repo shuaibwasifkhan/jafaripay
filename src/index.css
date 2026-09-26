@@ -42,8 +42,28 @@ select {
   caret-color: #000;
 }
 
-/* Autofill: some browsers force a light-blue background with dark text; keep the
-   text black so autofilled values remain clearly legible. */
+/* Hero showcase — subtle entrance for the floating status card.
+   Only used via `animate-[heroFade_0.5s_ease-out]` when reduced motion is off. */
+@keyframes heroFade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,

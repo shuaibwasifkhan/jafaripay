@@ -14,6 +14,7 @@ import DevelopersPage from './components/dashboard/DevelopersPage';
 import SettingsPage from './components/dashboard/SettingsPage';
 import CheckoutPage from './components/checkout/CheckoutPage';
 import DocsPage from './components/docs/DocsPage';
+import RoadmapPage from './components/landing/RoadmapPage';
 
 /**
  * Checks for an existing session on first mount.
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/checkout/:id" element={<CheckoutPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:slug" element={<DocsPage />} />
+          <Route path="/roadmap" element={<RoadmapPage />} />
 
           {/* Protected dashboard */}
           <Route path="/dashboard" element={
