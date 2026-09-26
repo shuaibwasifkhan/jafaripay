@@ -12,7 +12,7 @@ import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider
 import { enqueueWebhookDeliveries } from '../webhooks/delivery.js';
 
 const router = Router();
-const CHECKOUT_BASE = process.env.CHECKOUT_BASE_URL || 'https://pay.jafaripay.com';
+const CHECKOUT_BASE = process.env.CHECKOUT_BASE_URL || 'https://jafari.co.in';
 const PI_EXPIRY_S = 60 * 60; // 1 hour
 
 function hashRequest(body: unknown): string {

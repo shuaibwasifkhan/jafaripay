@@ -2,8 +2,13 @@
 
 A non-custodial developer payment infrastructure for accepting USDC through Payment Intents, hosted checkout, independent on-chain verification, direct merchant settlement, and signed webhooks — built on [Arc](https://arc.io).
 
-- **Live:** https://jafari.co.in
-- **Source:** https://github.com/shuaibwasifkhan/jafaripay
+## Links
+
+- **Website:** https://jafari.co.in
+- **Documentation:** https://jafari.co.in/docs
+- **Roadmap:** https://jafari.co.in/roadmap
+- **GitHub:** https://github.com/shuaibwasifkhan/jafaripay
+- **Developer contact:** dev@jafari.co.in
 
 ---
 
@@ -18,9 +23,26 @@ All of the following are implemented in this repository:
 - **Signed webhooks** — HMAC-SHA256 signed event deliveries with automatic retries.
 - **Idempotency protection** — `Idempotency-Key` support on Payment Intent creation.
 - **Duplicate/replay protection** — a settled transaction hash can never be credited twice.
-- **Reconciliation worker** — background expiry, stuck-state recovery, and webhook delivery.
+- **Reconciliation worker** — background expiry, stuck-state recovery, and webhook delivery; every intent is matched to its settled on-chain transfer in a single auditable ledger view.
 - **Merchant dashboard** — projects, settlement wallets, API keys, payments, and webhooks.
+- **Wallet-based authentication** — merchants sign in with SIWE / EIP-4361; no email or password.
 - **Testnet + Mainnet networks** — Arc Testnet (default) and Arc Mainnet, with live payments gated behind an explicit flag.
+
+## Live capabilities
+
+Available today in production (testnet and Arc Mainnet):
+
+- **Arc Mainnet Payments** — real USDC transfers on Arc Mainnet; live payments gated behind an explicit flag
+- **Payment Intents** — create, read, verify, cancel (`/v1/payment-intents`)
+- **Hosted Checkout** — wallet-connected checkout page (`/checkout/:id`)
+- **On-chain Payment Verification** — backend re-verifies every transfer against Arc RPC
+- **Direct Merchant Settlement** — customer USDC lands in the merchant's settlement wallet
+- **Signed Webhooks** — HMAC-SHA256 event deliveries with retries
+- **API Keys** — per-project `pk_`/`sk_` key pairs (test and live)
+- **Payment Reconciliation** — background expiry, stuck-state recovery, and webhook delivery
+- **Wallet-based Authentication** — SIWE / EIP-4361 sign-in for the merchant dashboard
+
+Roadmap items (Payment Links, Invoices, Recurring Billing, Multi-chain USDC, Agent Payments, Payment Firewall, Payment Passport) are **not** currently available — see the public roadmap for their status.
 
 ## Payment flow
 
@@ -29,6 +51,32 @@ Merchant → Payment Intent API → Hosted Checkout → Customer Wallet
         → Arc USDC Transfer → Independent On-chain Verification
         → Merchant Settlement → Signed Webhook
 ```
+
+## Documentation
+
+The public developer documentation lives at https://jafari.co.in/docs and covers: Quickstart, Authentication, Payment Intents, Checkout, JavaScript SDK, Webhooks, Webhook Verification, Test Mode, Production, Security, API Reference, Error Codes, Troubleshooting, and Changelog.
+
+The supported integration paths are the **hosted checkout page**, the **REST API**
+(see above), and the **JavaScript SDK**. The SDK ships as a standalone IIFE build
+served at `https://jafari.co.in/sdk.js`:
+
+```html
+<!-- Load the SDK -->
+<script src="https://jafari.co.in/sdk.js"></script>
+```
+
+It is a thin cross-origin messenger: it launches the hosted `/checkout/:id` page
+in a new window (`JafariPay.checkout`) or an embedded launcher (`JafariPay.mount`)
+and reports the checkout's terminal outcome via origin-verified `postMessage`
+callbacks. It does **not** process USDC, request wallet keys, or custody funds —
+verification and settlement remain in the JafariPay backend (webhooks and
+`/api/checkout/:id/verify`). A developer test page is at
+`https://jafari.co.in/sdk-demo.html?pi=<payment-intent-id>`; the reference
+documentation is at `https://jafari.co.in/docs/sdk`.
+
+## Roadmap
+
+See the public roadmap for current, planned, exploring, and future product directions: https://jafari.co.in/roadmap
 
 ## Non-custodial model
 
@@ -191,10 +239,13 @@ The production deployment has processed a real Arc Mainnet USDC payment:
 - Transaction: `0x9d82a3b3d2cf47192d179febf7f44bbc850ac5dc53912a57a6279f196fae74ef`
 - Explorer: https://explorer.arc.io/tx/0x9d82a3b3d2cf47192d179febf7f44bbc850ac5dc53912a57a6279f196fae74ef
 
-## Links
+## Resources
 
 - GitHub: https://github.com/shuaibwasifkhan/jafaripay
-- Live: https://jafari.co.in
+- Website: https://jafari.co.in
+- Documentation: https://jafari.co.in/docs
+- Roadmap: https://jafari.co.in/roadmap
+- Developer contact: dev@jafari.co.in
 - Arc explorer (Mainnet proof tx): https://explorer.arc.io/tx/0x9d82a3b3d2cf47192d179febf7f44bbc850ac5dc53912a57a6279f196fae74ef
 
 ## License

@@ -161,9 +161,25 @@ if (hasDist) {
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
         res.setHeader('Surrogate-Control', 'no-store');
+      } else if (filePath.endsWith('sdk.js')) {
+        // The JafariPay SDK is a real, versioned static asset.  Long cache,
+        // integrators can pin/refresh via JafariPay.version.  Never no-store.
+        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        res.setHeader('Cache-Control', 'public, max-age=604800, must-revalidate');
       }
     },
   }));
+  // Guard: if the SDK artifact is missing from this build, 404 it explicitly
+  // instead of falling through to the SPA (index.html).  When the file exists,
+  // express.static above already serves it with the headers set above.
+  app.get('/sdk.js', (_req, res) => {
+    if (!existsSync(join(distPath, 'sdk.js'))) {
+      res.status(404).json({ error: 'JafariPay SDK not found. Run: bun run build:sdk' });
+      return;
+    }
+    res.type('application/javascript');
+    res.sendFile(join(distPath, 'sdk.js'));
+  });
   // SPA fallback — all non-API/non-file routes return index.html.
   // NOTE: /checkout is a BROWSER route (hosted checkout UI), so it is intentionally
   // NOT in this API list — the JSON checkout API lives under /api/checkout.

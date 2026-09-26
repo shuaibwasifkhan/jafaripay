@@ -83,18 +83,15 @@ const { checkout_url } = await createPaymentIntent(...);
 window.location.href = checkout_url;
 \`\`\`
 
-Or use the SDK:
+### Or use the JavaScript SDK
 
-\`\`\`html
-<script src="/sdk.js"></script>
-<script>
-JafariPay.checkout({
-  paymentIntent: "pi_xxx",
-  onPaymentSuccess: (data) => {
-    window.location.href = "/order-confirmed";
-  }
-});
-</script>
+The standalone JavaScript SDK launches the hosted checkout for you — load \`sdk.js\` and call \`checkout()\` (new window) or \`mount()\` (embedded launcher):
+
+\`\`\`javascript
+<script src="https://jafari.co.in/sdk.js"></script>
+JafariPay.checkout({ paymentIntent: pi_id });
+// or embed a launcher:
+// JafariPay.mount('#jafaripay-checkout', { paymentIntent: pi_id });
 \`\`\`
 
 ### 6. Listen for the webhook
@@ -212,14 +209,23 @@ The checkout page:
 ### Redirect flow
 
 \`\`\`javascript
-// Server-side: create intent
-const payment = await jafaripay.paymentIntents.create({
-  amount: "25.00",
-  currency: "USDC",
-  order_id: req.body.orderId,
+// Server-side: create a Payment Intent via the REST API (sk_ key)
+const res = await fetch("https://your-instance.com/v1/payment-intents", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "order-123",
+  },
+  body: JSON.stringify({
+    amount: "25.00",
+    currency: "USDC",
+    order_id: req.body.orderId,
+  }),
 });
+const payment = await res.json();
 
-// Redirect customer
+// Redirect customer to the hosted checkout page
 res.redirect(payment.checkout_url);
 \`\`\`
 
@@ -229,46 +235,65 @@ Do not use the frontend redirect as your payment confirmation. Listen for the \`
     title: 'JavaScript SDK',
     body: `## JavaScript SDK
 
+> **Status: available.** The JafariPay JavaScript SDK ships as a standalone IIFE build served at \`/sdk.js\`. It is a thin cross-origin messenger that launches the hosted checkout for you — it does **not** process USDC, request wallet keys, or custody funds, and no payment verification or settlement happens in the client bundle. Verification and settlement remain in the backend (webhooks and \`/api/checkout/:id/verify\`).
+
+Load the SDK once on your page:
+
 \`\`\`html
-<script src="https://your-instance.com/sdk.js"></script>
+<script src="https://jafari.co.in/sdk.js"></script>
 \`\`\`
+
+A developer test page that exercises the real checkout flow (no fake result) is available at \`/sdk-demo.html?pi=<payment-intent-id>\`.
+
+The sections below document the \`JafariPay.checkout\` and \`JafariPay.mount\` API.
 
 ### JafariPay.checkout()
 
-Opens a checkout modal overlay.
+Opens the existing hosted checkout in a new window/popup and returns a handle
+(\`{ url, win, close(), destroy() }\`). It is a UI messenger only — the result
+callbacks fire on the checkout's reported terminal outcome and are **not**
+settlement proof (confirm via your webhook).
 
 \`\`\`javascript
-JafariPay.checkout({
-  paymentIntent: "pi_xxx",
+const handle = JafariPay.checkout({
+  paymentIntent: "pi_...",
+  // optional, defaults to https://jafari.co.in
   baseUrl: "https://your-instance.com",
-  onReady: () => console.log("Checkout ready"),
-  onWalletConnected: (address) => console.log("Wallet:", address),
-  onPaymentSubmitted: (txHash) => console.log("TX:", txHash),
-  onPaymentProcessing: () => console.log("Processing..."),
-  onPaymentSuccess: (data) => {
-    console.log("Success! Payment:", data.payment_id);
-    window.location.href = "/success";
-  },
-  onPaymentError: (error) => console.error("Error:", error),
-  onClose: () => console.log("Closed"),
+  onPaymentSuccess: (r) => console.log("succeeded", r.status, r.paymentIntent),
+  onPaymentFailed:  (r) => console.log("failed", r.error),
+  onPaymentExpired: (r) => console.log("expired"),
+  onClose: () => console.log("customer closed the checkout"),
 });
+// later:
+// handle.close();   // close the window + fire onClose
+// handle.destroy(); // detach listeners
 \`\`\`
 
 ### JafariPay.mount()
 
-Embeds checkout inside an existing element.
+Embeds a "Pay with USDC" launcher into an existing element; clicking it opens
+the hosted checkout in a same-origin iframe and manages its lifecycle.
 
 \`\`\`javascript
-JafariPay.mount("#checkout-container", {
-  paymentIntent: "pi_xxx",
-  baseUrl: "https://your-instance.com",
-  onPaymentSuccess: (data) => { ... },
+const inst = JafariPay.mount("#jafaripay-checkout", {
+  paymentIntent: "pi_...",
+  onPaymentSuccess: (r) => { ... },
+  onPaymentFailed:  (r) => { ... },
+  onClose: () => { ... },
 });
+inst.open();    // show the embedded checkout
+inst.close();   // hide it
+inst.destroy(); // remove the launcher + listeners
 \`\`\`
+
+> The \`version\` property (\`JafariPay.version\`) reports the SDK build version.
 
 ### SDK security
 
-The SDK only accepts a Payment Intent ID — never a secret key. Secret keys (\`sk_\`) must never appear in frontend code.`,
+The SDK only accepts a Payment Intent ID — never a secret key. It verifies
+\`postMessage\` origins strictly (only the checkout's own origin is trusted) and
+accepts only a matching \`paymentIntent\`. Secret keys (\`sk_\`) must never appear
+in frontend code, and no settlement happens in the bundle.`,
   },
   webhooks: {
     title: 'Webhooks',
@@ -592,7 +617,7 @@ const SUBTITLES: Record<string, string> = {
   auth: 'Sign-In With Ethereum (SIWE / EIP-4361) — no email or password, your wallet address is your identity.',
   'payment-intents': 'A Payment Intent represents a customer’s intent to pay a specific amount.',
   checkout: 'A hosted checkout page for every Payment Intent — connect, pay, verify.',
-  sdk: 'Open or embed the JafariPay checkout in your frontend.',
+  sdk: 'Embeddable checkout SDK — load /sdk.js and call JafariPay.checkout() or JafariPay.mount().',
   webhooks: 'Signed event notifications delivered to your server.',
   'webhook-verification': 'HMAC-SHA256 signature verification for every webhook delivery.',
   'test-mode': 'Develop against Arc Testnet with real USDC transactions.',

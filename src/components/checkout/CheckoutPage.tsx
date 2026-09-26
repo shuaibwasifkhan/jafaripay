@@ -90,6 +90,35 @@ export default function CheckoutPage() {
     return () => clearInterval(t);
   }, []);
 
+  // ── SDK / embedder notification (UI signal only) ────────────────────────
+  // When this page runs inside an iframe (JafariPay.mount) or in a popup
+  // opened by JafariPay.checkout, tell the embedding window which terminal
+  // outcome we reached.  The SDK verifies `event.origin` strictly against the
+  // checkout's own origin, so this is a pure UI notification: it carries no
+  // settlement proof and no secrets.  Real verification + settlement remain
+  // entirely server-side (POST /api/checkout/:id/verify).
+  useEffect(() => {
+    if (!id) return;
+    if (step !== 'succeeded' && step !== 'failed' && step !== 'expired' && step !== 'cancelled') return;
+    const payload = {
+      type: 'jafaripay:payment',
+      status: step,
+      paymentIntent: id,
+      ts: Date.now(),
+    };
+    try {
+      if (typeof window === 'undefined') return;
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, '*');
+      }
+      if (window.opener) {
+        window.opener.postMessage(payload, '*');
+      }
+    } catch {
+      /* never let a notification failure affect the checkout UI */
+    }
+  }, [step, id]);
+
   const chainId = intent?.chain_id ?? ARC_TESTNET_ID;
   const usdcFact = getUsdc(chainId);
 

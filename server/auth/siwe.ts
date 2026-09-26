@@ -10,7 +10,7 @@ import { generateId } from '../lib/ids.js';
 const SESSION_TTL_S = 60 * 60 * 24 * 7; // 7 days
 const NONCE_TTL_S   = 60 * 5;            // 5 minutes
 
-const DOMAIN = process.env.JAFARIPAY_DOMAIN || 'jafaripay.com';
+const DOMAIN = process.env.JAFARIPAY_DOMAIN || 'jafari.co.in';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'change-me-in-production';
 
 export function generateNonce(): { nonce: string; expiresAt: number } {

@@ -14,17 +14,24 @@ const intent = await client.paymentIntents.create({
 
 console.log(intent.checkout_url);`;
 
-const SDK_EXAMPLE = `<script src="https://cdn.jafaripay.com/sdk.js"></script>
-<script>
+const SDK_EXAMPLE = `// Embed the JafariPay JavaScript SDK on the frontend (served at /sdk.js).
+// No secrets: the SDK only takes a Payment Intent id and launches the
+// existing hosted checkout — verification/settlement stay server-side.
+
+<script src="https://jafari.co.in/sdk.js"></script>
+
+// Open the hosted checkout in a new window:
 JafariPay.checkout({
-  paymentIntent: "pi_abc123",
-  onPaymentSuccess: (data) => {
-    console.log("Payment intent:", data.paymentIntentId);
-    window.location.href = "/thank-you";
-  },
-  onPaymentError: (err) => console.error(err)
+  paymentIntent: intent.id,
+  onPaymentSuccess: (r) => { /* UI only — confirm via your webhook */ },
+  onPaymentFailed:  (r) => {},
+  onClose: () => {},
 });
-</script>`;
+
+// Or embed a "Pay with USDC" launcher into an element:
+// JafariPay.mount('#jafaripay-checkout', { paymentIntent: intent.id });
+
+// Confirm on your server with the signed payment.succeeded webhook.`;
 
 const WEBHOOK_EXAMPLE = `const crypto = require('crypto');
 
@@ -84,7 +91,7 @@ export default function DevelopersPage() {
           <p className="text-xs text-slate-500 mb-3">1. Create a payment intent on your backend using your <code className="text-forest-700">sk_test_</code> key:</p>
           <pre className="p-4 bg-sand-100 rounded-xl text-xs font-mono text-slate-600 overflow-x-auto">{NODEJS_EXAMPLE}</pre>
 
-          <p className="text-xs text-slate-500 mt-5 mb-3">2. Open checkout on the frontend using the SDK:</p>
+          <p className="text-xs text-slate-500 mt-5 mb-3">2. Launch the checkout on the frontend via the JavaScript SDK (served at <code className="text-forest-700">/sdk.js</code>):</p>
           <pre className="p-4 bg-sand-100 rounded-xl text-xs font-mono text-slate-600 overflow-x-auto">{SDK_EXAMPLE}</pre>
         </Card>
 

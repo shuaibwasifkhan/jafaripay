@@ -12,30 +12,30 @@ const SUPPORT_EMAIL = 'dev@jafari.co.in';
 const FOOTER_LINK_CLS =
   'group flex items-center gap-1.5 text-xs font-medium text-ink/60 transition-colors hover:text-forest-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest-300 focus-visible:ring-offset-2 focus-visible:ring-offset-cream-50 rounded';
 
-const INTEGRATION_CODE = `const payment = await jafaripay.paymentIntents.create({
-  amount: "1.00",
-  currency: "USDC",
-  order_id: "ORDER-123"
-});
+const INTEGRATION_CODE = `// 1. Create a Payment Intent on your backend (sk_ key)
+const intent = await fetch("https://your-instance.com/v1/payment-intents", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "order-123",
+  },
+  body: JSON.stringify({ amount: "1.00", currency: "USDC" }),
+}).then((r) => r.json());
 
-JafariPay.checkout({
-  paymentIntent: payment.id,
-  onPaymentSuccess: (data) => {
-    // Mark order paid via webhook verification
-    console.log('Payment intent:', data.paymentIntentId);
-  }
-});`;
+// 2. Hand the customer the hosted checkout URL
+res.redirect(intent.checkout_url);`;
 
-const SDK_CODE = `<script src="https://cdn.jafaripay.com/sdk.js"></script>
+const FRONTEND_CODE = `// Frontend — launch the checkout two supported ways:
+// 1) Redirect to the hosted checkout page:
+window.location.href = intent.checkout_url;
 
-<script>
-JafariPay.checkout({
-  paymentIntent: "pi_abc123",
-  onPaymentSuccess: (data) => {
-    window.location.href = '/success';
-  }
-});
-</script>`;
+// 2) Or use the JavaScript SDK (served at /sdk.js):
+//    <script src="https://jafari.co.in/sdk.js"></script>
+//    JafariPay.checkout({ paymentIntent: intent.id });
+//    JafariPay.mount('#jafaripay-checkout', { paymentIntent: intent.id });
+
+// 3. Confirm on your server with the signed payment.succeeded webhook.`;
 
 const CAPABILITIES = [
   { icon: Zap, label: 'USDC Native', desc: 'Settle in USDC on Arc' },
@@ -68,7 +68,7 @@ const FEATURES = [
     eyebrow: 'Developer',
     icon: Code2, tile: 'bg-lilac-50', iconCls: 'text-lilac-600',
     title: 'Developer first',
-    desc: 'REST API, JavaScript SDK, hosted checkout, OpenAPI docs, and idempotent requests.'
+    desc: 'REST API, JavaScript SDK, hosted checkout, signed webhooks, and idempotent requests.'
   },
   {
     eyebrow: 'Security',
@@ -390,13 +390,13 @@ export default function LandingPage() {
               Ship a USDC payment flow in an afternoon
             </h2>
             <p className="text-slate-600 mb-6 leading-relaxed">
-              A clean REST API, a JavaScript SDK, and a hosted checkout. Create an intent on your server, embed checkout on the frontend, and confirm with a signed webhook.
+              A clean REST API, a JavaScript SDK, and a hosted checkout. Create an intent on your server, launch checkout on the frontend, and confirm with a signed webhook.
             </p>
 
             <div className="space-y-4 mb-8">
               {[
-                { icon: Code2, title: 'REST API + JS SDK', desc: 'Idempotent requests and OpenAPI reference for every endpoint.' },
-                { icon: CheckCircle, title: 'Hosted checkout', desc: 'Embed one SDK call — wallet connect, chain switch, and USDC transfer handled for you.' },
+                { icon: Code2, title: 'REST API + JS SDK', desc: 'Idempotent requests, an OpenAPI reference, and a drop-in JavaScript SDK for the frontend.' },
+                { icon: CheckCircle, title: 'Hosted checkout', desc: 'One checkout URL — wallet connect, chain switch, and USDC transfer handled for you.' },
                 { icon: Webhook, title: 'Signed webhooks', desc: 'HMAC-SHA256 verification, automatic retries, and replay protection.' },
               ].map(({ icon: Icon, title: t, desc }) => (
                 <div key={t} className="flex items-start gap-3">
@@ -433,7 +433,7 @@ export default function LandingPage() {
                 <div className="px-4 py-2.5 border-b border-sand-200 text-[11px] text-slate-500 font-medium uppercase tracking-wider flex items-center gap-1.5">
                   <Key size={11} className="text-lilac-600" /> Frontend
                 </div>
-                <pre className="p-4 text-xs font-mono leading-relaxed text-slate-600 overflow-x-auto">{SDK_CODE}</pre>
+                <pre className="p-4 text-xs font-mono leading-relaxed text-slate-600 overflow-x-auto">{FRONTEND_CODE}</pre>
               </div>
             </div>
 

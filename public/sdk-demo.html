@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JafariPay SDK — demo / test harness</title>
+  <!--
+    Development/test harness for the JafariPay JavaScript SDK.
+
+    Load a real Payment Intent id via the ?pi= query param, e.g.:
+        /sdk-demo.html?pi=pi_xxx...
+
+    The SDK itself does NO fake result — it launches the real hosted checkout
+    (https://jafari.co.in/checkout/:pi) and reports whatever the checkout
+    reports.  This page is only an integration scratchpad; it is not part of
+    the payment flow and adds no settlement behaviour.
+  -->
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; line-height: 1.5; }
+    h1 { font-size: 20px; }
+    section { border: 1px solid #e2e2e2; border-radius: 12px; padding: 16px; margin: 16px 0; }
+    button { padding: 10px 14px; border-radius: 10px; border: 0; background: #1e5c4a; color: #fff; font-weight: 600; cursor: pointer; }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+    #log { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; background: #0b0f14; color: #c9d1d9; padding: 10px; border-radius: 10px; min-height: 24px; }
+  </style>
+</head>
+<body>
+  <h1>JafariPay JavaScript SDK — demo</h1>
+  <p>
+    SDK version: <code id="ver">…</code><br />
+    Payment intent: <code id="pi">…</code>
+  </p>
+
+  <section>
+    <h2>1. JafariPay.checkout()</h2>
+    <button id="btn-checkout">Open hosted checkout (new window)</button>
+    <p style="font-size:13px;color:#555">Launches <code>/checkout/:pi</code> in a new window. No funds are processed here.</p>
+  </section>
+
+  <section>
+    <h2>2. JafariPay.mount("#jafaripay-checkout")</h2>
+    <div id="jafaripay-checkout"></div>
+    <p style="font-size:13px;color:#555">Embedded launcher; clicking it opens the same hosted checkout in an iframe.</p>
+  </section>
+
+  <section>
+    <h2>Events</h2>
+    <div id="log">(no events yet)</div>
+  </section>
+
+  <script src="/sdk.js"></script>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var pi = params.get('pi') || 'pi_test_demo'; // placeholder — pass a real ?pi= to exercise a live flow
+      var logEl = document.getElementById('log');
+      function log(msg) {
+        var ts = new Date().toLocaleTimeString();
+        logEl.textContent += ((logEl.textContent && logEl.textContent !== '(no events yet)') ? '\n' : '') + '[' + ts + '] ' + msg;
+        if (logEl.textContent.startsWith('(no events yet)')) logEl.textContent = logEl.textContent.replace('(no events yet)\n', '[' + ts + '] ');
+      }
+      document.getElementById('pi').textContent = pi;
+      document.getElementById('ver').textContent = (window.JafariPay && window.JafariPay.version) || '(SDK not loaded)';
+
+      var opts = {
+        paymentIntent: pi,
+        onPaymentSuccess: function (r) { log('success  ' + r.paymentIntent + ' (' + r.source + ')'); },
+        onPaymentFailed: function (r) { log('failed   ' + r.paymentIntent + ' (' + (r.error || r.source) + ')'); },
+        onPaymentExpired: function (r) { log('expired  ' + r.paymentIntent + ' (' + r.source + ')'); },
+        onClose: function () { log('closed   ' + pi); },
+      };
+
+      document.getElementById('btn-checkout').addEventListener('click', function () {
+        var handle = JafariPay.checkout(opts);
+        log('checkout() → ' + handle.url);
+        handle.destroy(); // detach the auto-polling timer after we've captured the URL; the window stays open
+      });
+
+      // Mount the embedded launcher once.
+      var mounted = JafariPay.mount('#jafaripay-checkout', opts);
+      log('mount() ready → click "Pay with USDC" to open the embedded checkout');
+    })();
+  </script>
+</body>
+</html>
