@@ -20,6 +20,27 @@ import { getDb } from '../db/schema.js';
  */
 export const PI_SETTLEMENT_GRACE_S = 20 * 60; // 20 minutes
 
+// ── Finality modes (Phase 5H) ─────────────────────────────────────────────
+// Registry-driven per-network finality POLICY. Each mode names what must be
+// true before a receipt may be credited:
+//
+//   'immediate'  — no gate: a receipt existing on the pinned chain credits.
+//                  Correct only for commit-final chains (Arc: BFT <1s, no
+//                  reorgs — docs.arc.io "Deterministic finality and settlement").
+//   'count'      — required_confirmations child blocks below the `latest` head
+//                  (the historical Phase 2 integer gate — unchanged semantics).
+//   'safe'       — the tx block is at or below the chain's `safe` head
+//                  (batch posted to the parent chain — OP-Stack / Arbitrum).
+//   'finalized'  — the tx block is at or below the chain's `finalized` head
+//                  (parent-chain finalized — hard finality for L2 deposits).
+//
+// FAIL-CLOSED CONTRACT (mandatory): a 'safe'/'finalized' row whose RPC does not
+// serve that tag (error, null, or any other failure) THROWS — verification
+// refuses rather than silently degrading to 'latest', a count, or 'immediate'.
+// An unknown/empty mode also throws: there is no default finality.
+export type FinalityMode = 'immediate' | 'count' | 'safe' | 'finalized';
+export const FINALITY_MODES: ReadonlySet<string> = new Set(['immediate', 'count', 'safe', 'finalized']);
+
 // ── Network config ─────────────────────────────────────────────────────────
 
 export interface NetworkConfig {
@@ -29,21 +50,107 @@ export interface NetworkConfig {
   explorerBase: string;
   usdcAddress: string;
   usdcDecimals: number;
+  requiredConfirmations: number;
+  finalityMode: FinalityMode;
 }
 
-function buildRpcUrl(compassChain: string, publicFallback: string): string {
-  const proxyChains = (process.env.RPC_PROXY_CHAINS || '').split(',');
-  if (process.env.RPC_PROXY_BASE_URL && proxyChains.includes(compassChain)) {
-    return `${process.env.RPC_PROXY_BASE_URL}/api/rpc/${compassChain}?_rpc_token=${process.env.RPC_PROXY_TOKEN}`;
+// ── RPC proxy mapping (Phase 2 hardening; deployment model made explicit in 5E) ─
+// JafariPay supports exactly TWO RPC deployment models, chosen by server-side
+// environment alone. Neither ever takes a URL or a proxy slug from a request,
+// a payment intent, or the browser:
+//
+//   MODEL 1 — direct curated RPC (RPC_PROXY_BASE_URL unset; today's default)
+//     resolveRpcUrl returns the registry's network_configs.rpc_url verbatim, so
+//     any enabled network works with zero proxy configuration and adding a
+//     standard-EVM network is a registry + CSP + frontend change only.
+//
+//   MODEL 2 — proxy mode (RPC_PROXY_BASE_URL set)
+//     A network is proxied only when (a) it has an explicit entry in PROXY_SLUGS
+//     AND (b) that proxy slug is listed in RPC_PROXY_CHAINS. Missing (a) THROWS:
+//     an unmapped network is never handed a guessed or Arc fallback slug. Missing
+//     only (b) leaves that network on its own curated registry URL — a per-network
+//     opt-out of the proxy, never a route from one chain to another.
+//
+// Consequence for expansion: enabling a new network in network_configs suffices
+// under MODEL 1; under MODEL 2 it additionally needs an explicit PROXY_SLUGS
+// entry. Failing closed until that entry exists is the intended, reviewed
+// behavior — this phase deliberately does NOT add mappings for networks that are
+// not enabled, so the proxy can never serve one chain for another.
+//
+// In BOTH models the constructed client still calls eth_chainId and compares it
+// with the pinned registry chain_id (ensureChainIdMatches) before any receipt or
+// finality read, so a wrong or lying endpoint fails closed either way.
+//
+// This replaces the old Arc-specific ternary (`network === 'arc_testnet' ?
+// 'Arc_Testnet' : 'Arc'`) which silently mapped EVERY unknown network to the Arc
+// mainnet proxy slug — a chain-confusion risk.
+const PROXY_SLUGS: Readonly<Record<string, string>> = Object.freeze({
+  arc_testnet: 'Arc_Testnet',
+  arc_mainnet: 'Arc',
+});
+
+export function resolveRpcUrl(network: string, configuredRpcUrl: string): string {
+  if (process.env.RPC_PROXY_BASE_URL) {
+    // Own-property check only: `PROXY_SLUGS[network]` would otherwise resolve
+    // inherited keys (`constructor`, `toString`, `__proto__`) to a truthy value
+    // and silently skip the fail-closed path below.
+    const slug = Object.hasOwn(PROXY_SLUGS, network) ? PROXY_SLUGS[network] : undefined;
+    // Proxy mode is enabled but this registry network has no explicit,
+    // verified proxy mapping → FAIL CLOSED. Do not guess a slug.
+    if (!slug) {
+      throw new Error(
+        `[RPC] Proxy mode is enabled but network "${network}" has no explicit proxy mapping — ` +
+        `refusing to route it through an Arc endpoint (chain-confusion risk)`
+      );
+    }
+    const proxyChains = (process.env.RPC_PROXY_CHAINS || '').split(',');
+    if (proxyChains.includes(slug)) {
+      // A missing token would be interpolated into the URL as the literal string
+      // "undefined" — a misconfigured deployment must fail closed before the
+      // request is made rather than issue an unauthenticated proxy call.
+      if (!process.env.RPC_PROXY_TOKEN) {
+        throw new Error(
+          `[RPC] Proxy mode is enabled for "${network}" but RPC_PROXY_TOKEN is not set — ` +
+          `refusing to call the proxy without credentials`
+        );
+      }
+      return `${process.env.RPC_PROXY_BASE_URL}/api/rpc/${slug}?_rpc_token=${process.env.RPC_PROXY_TOKEN}`;
+    }
   }
-  return publicFallback; // arc-studio-allow-onchain-literal
+  return configuredRpcUrl;
 }
 
+// ── Registry validation (Phase 2 hardening) ────────────────────────────────
+// A registry row is the trust anchor for every downstream verification step,
+// so loading it validates the fields that money depends on. Any violation
+// throws — the provider refuses to operate (fail closed) rather than run
+// against a misconfigured endpoint. JafariPay is USDC-only: no token
+// abstraction, decimals must be exactly 6.
 export function getNetworkConfig(network: string): NetworkConfig {
   const db = getDb();
-  type DbRow = { id: string; network: string; chain_id: number; rpc_url: string; explorer_base: string; usdc_address: string; usdc_decimals: number; is_enabled: number };
+  type DbRow = {
+    id: string; network: string; chain_id: number; rpc_url: string; explorer_base: string;
+    usdc_address: string; usdc_decimals: number; is_enabled: number; required_confirmations: number;
+    finality_mode: string;
+  };
+  // UNIQUE(network) guarantees at most one row per slug; only enabled rows resolve.
   const row = db.prepare('SELECT * FROM network_configs WHERE network = ? AND is_enabled = 1').get(network) as DbRow | undefined;
   if (!row) throw new Error(`Network "${network}" is not configured or not enabled`);
+
+  const problems: string[] = [];
+  if (!Number.isInteger(row.chain_id) || row.chain_id <= 0) problems.push(`chain_id=${row.chain_id}`);
+  if (typeof row.rpc_url !== 'string' || row.rpc_url.trim() === '') problems.push('rpc_url is missing');
+  else { try { new URL(row.rpc_url); } catch { problems.push(`rpc_url is not a valid URL (${row.rpc_url})`); } }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(row.usdc_address)) problems.push(`usdc_address=${row.usdc_address}`);
+  if (row.usdc_decimals !== 6) problems.push(`usdc_decimals=${row.usdc_decimals} (JafariPay is USDC-only: 6 decimals)`);
+  if (!Number.isInteger(row.required_confirmations) || row.required_confirmations < 0) problems.push(`required_confirmations=${row.required_confirmations}`);
+  // Phase 5H: the finality mode is part of the money gate — an unknown or
+  // missing mode fails closed exactly like a bad chain id or USDC address.
+  if (!FINALITY_MODES.has(row.finality_mode)) problems.push(`finality_mode=${JSON.stringify(row.finality_mode)} (allowed: ${[...FINALITY_MODES].join(', ')})`);
+  if (problems.length > 0) {
+    throw new Error(`Network "${network}" registry config invalid — ${problems.join('; ')} — refusing to operate`);
+  }
+
   // Map snake_case DB columns to camelCase interface
   return {
     network: row.network,
@@ -52,7 +159,38 @@ export function getNetworkConfig(network: string): NetworkConfig {
     explorerBase: row.explorer_base,
     usdcAddress: row.usdc_address,
     usdcDecimals: row.usdc_decimals,
+    requiredConfirmations: row.required_confirmations,
+    finalityMode: row.finality_mode as FinalityMode,
   };
+}
+
+// ── Registry reads for non-money network metadata (Phase 5E) ───────────────
+// The UI-facing surfaces (settlement wallets, network picker) need the network's
+// *class* — which is registry data (`is_testnet`), never a slug-name comparison
+// such as `network === 'arc_mainnet' ? 'live' : 'test'`. This is the same
+// `network_configs` table that `getNetworkConfig` above gates money against: one
+// registry, one source of truth, no second hardcoded network list anywhere.
+export interface NetworkMeta {
+  network: string;
+  chainId: number;
+  isTestnet: boolean;
+  isEnabled: boolean;
+}
+
+export function getNetworkMeta(network: string): NetworkMeta | null {
+  const row = getDb()
+    .prepare('SELECT network, chain_id, is_testnet, is_enabled FROM network_configs WHERE network = ?')
+    .get(network) as { network: string; chain_id: number; is_testnet: number; is_enabled: number } | undefined;
+  if (!row) return null; // unknown slug — callers fail closed, there is no default network
+  return { network: row.network, chainId: row.chain_id, isTestnet: row.is_testnet === 1, isEnabled: row.is_enabled === 1 };
+}
+
+/** Enabled rows only — the list of networks a merchant may actually select. */
+export function listEnabledNetworks(): NetworkMeta[] {
+  const rows = getDb()
+    .prepare('SELECT network, chain_id, is_testnet FROM network_configs WHERE is_enabled = 1 ORDER BY is_testnet DESC, network')
+    .all() as { network: string; chain_id: number; is_testnet: number }[];
+  return rows.map((r) => ({ network: r.network, chainId: r.chain_id, isTestnet: r.is_testnet === 1, isEnabled: true }));
 }
 
 // ── BlockchainProvider interface ───────────────────────────────────────────
@@ -77,6 +215,8 @@ export interface RawLog {
 export interface BlockchainProvider {
   getTransactionReceipt(txHash: string): Promise<TransactionReceipt | null>;
   getBlockTimestamp(blockNumber: bigint): Promise<bigint>;
+  getLatestBlockNumber(): Promise<bigint>;
+  getHeadBlockNumber(tag: 'safe' | 'finalized'): Promise<bigint>;
 }
 
 // ── ArcProvider ────────────────────────────────────────────────────────────
@@ -84,13 +224,12 @@ export interface BlockchainProvider {
 export class ArcProvider implements BlockchainProvider {
   private client: PublicClient;
   private config: NetworkConfig;
+  private chainIdVerified = false;
 
   constructor(network: string) {
     this.config = getNetworkConfig(network);
-    const rpcUrl = buildRpcUrl(
-      network === 'arc_testnet' ? 'Arc_Testnet' : 'Arc',
-      this.config.rpcUrl
-    );
+    // Registry-driven proxy mapping with fail-closed semantics (Phase 2).
+    const rpcUrl = resolveRpcUrl(network, this.config.rpcUrl);
     this.client = createPublicClient({
       transport: http(rpcUrl, {
         timeout: 15_000,
@@ -100,7 +239,40 @@ export class ArcProvider implements BlockchainProvider {
     }) as PublicClient;
   }
 
+  /**
+   * Phase 2 chain-confusion protection: prove the endpoint we are about to
+   * verify money against actually serves the chain the registry says it does
+   * (network_configs.chain_id). Checked once per provider instance, BEFORE any
+   * receipt/finality read. Mismatch or an unreachable endpoint throws — we
+   * never silently fall back to another chain/RPC and never verify against a
+   * lying endpoint. Today's Arc rows pass (their RPCs serve 5042002/5042).
+   */
+  async ensureChainIdMatches(): Promise<void> {
+    if (this.chainIdVerified) return;
+    let onChain: number;
+    try {
+      onChain = await this.client.getChainId();
+    } catch (err) {
+      // Fail closed: an RPC that cannot answer eth_chainId cannot be trusted
+      // with payment verification either.
+      throw new Error(
+        `[RPC] Chain verification failed for "${this.config.network}": eth_chainId request failed — refusing to verify payments against this endpoint`,
+        { cause: err }
+      );
+    }
+    if (!Number.isInteger(onChain) || onChain !== this.config.chainId) {
+      throw new Error(
+        `[RPC] Chain mismatch for "${this.config.network}": endpoint reports chain id ${onChain}, ` +
+        `registry expects ${this.config.chainId} — refusing to verify payments against this endpoint`
+      );
+    }
+    this.chainIdVerified = true;
+  }
+
   async getTransactionReceipt(txHash: string): Promise<TransactionReceipt | null> {
+    // Outside the try/catch below so a mismatch/transport error propagates
+    // (fail closed) instead of being mapped to a benign "receipt not found".
+    await this.ensureChainIdMatches();
     try {
       const receipt = await this.client.getTransactionReceipt({
         hash: txHash as `0x${string}`,
@@ -138,8 +310,46 @@ export class ArcProvider implements BlockchainProvider {
   }
 
   async getBlockTimestamp(blockNumber: bigint): Promise<bigint> {
+    await this.ensureChainIdMatches();
     const block = await this.client.getBlock({ blockNumber });
     return block.timestamp;
+  }
+
+  /** Current chain head (latest block height) — used by the 'count' finality gate. */
+  async getLatestBlockNumber(): Promise<bigint> {
+    await this.ensureChainIdMatches();
+    return await this.client.getBlockNumber();
+  }
+
+  /**
+   * Phase 5H: head height for a finality TAG ('safe' | 'finalized'). Used by
+   * the tag-driven finality gates. (viem's getBlockNumber takes no blockTag,
+   * so the tag head is read via getBlock.) FAIL CLOSED by construction: any
+   * RPC error (unsupported tag, unknown block, transport failure) and a null
+   * block/height propagate as a thrown Error — a tag-mode network whose RPC
+   * cannot serve the tag can never credit, and never silently degrades to
+   * 'latest', a confirmation count, or 'immediate'. viem retries at the
+   * transport level only for network failures, never for a JSON-RPC error.
+   */
+  async getHeadBlockNumber(tag: 'safe' | 'finalized'): Promise<bigint> {
+    await this.ensureChainIdMatches();
+    let head: bigint | null | undefined;
+    try {
+      head = (await this.client.getBlock({ blockTag: tag })).number;
+    } catch (err) {
+      throw new Error(
+        `[RPC] Network "${this.config.network}" requires the '${tag}' finality tag but the endpoint ` +
+        `cannot serve it — refusing to verify payments (no fallback to latest/count/immediate)`,
+        { cause: err }
+      );
+    }
+    if (head === null || head === undefined) {
+      throw new Error(
+        `[RPC] Network "${this.config.network}" requires the '${tag}' finality tag but the endpoint ` +
+        `returned no block for it — refusing to verify payments (no fallback to latest/count/immediate)`
+      );
+    }
+    return head;
   }
 
   getConfig(): NetworkConfig { return this.config; }
@@ -225,8 +435,50 @@ export async function verifyPayment(input: VerificationInput): Promise<Verificat
     return { success: false, failureReason: 'Transaction not found on chain' };
   }
 
-  // 2. Correct Arc network — verified implicitly: the provider is constructed from the
-  // network config so if the tx resolves on this RPC it belongs to this network.
+  // 2. Correct network — now verified EXPLICITLY (Phase 2): the provider
+  // checks eth_chainId against network_configs.chain_id before any receipt
+  // read, so a tx from another chain can never resolve here.
+
+  // 2b. Finality gate (Phase 2 integer gate; Phase 5H registry-driven MODE).
+  // network_configs.finality_mode names the policy, enforced against the
+  // PI-pinned network's own endpoint (ensureChainIdMatches already ran):
+  //   'immediate' — no gate (Arc: receipt-exists credits; zero extra RPC calls,
+  //                 exactly today's production behavior).
+  //   'count'     — required_confirmations child blocks below the latest head.
+  //                 Arithmetic is the unchanged Phase 2 code path — bigint only.
+  //   'safe'/'finalized' — the tx block must be at or below that tag's head.
+  //                 The tag read FAILS CLOSED: an RPC that cannot serve the
+  //                 tag throws out of verification; there is never a silent
+  //                 fallback to latest, a count, or immediate.
+  // Unknown modes cannot reach here (getNetworkConfig fails closed), but the
+  // switch default refuses again — defense in depth, no implicit finality.
+  const { requiredConfirmations, finalityMode } = provider.getConfig();
+  if (finalityMode === 'count' && requiredConfirmations > 0) {
+    const head = await provider.getLatestBlockNumber();
+    const confirmations = head - receipt.blockNumber + 1n; // tx in the head block has 1 confirmation
+    if (confirmations < BigInt(requiredConfirmations)) {
+      return {
+        success: false,
+        failureReason:
+          `Insufficient confirmations: ${confirmations.toString()} < required ${requiredConfirmations} ` +
+          `(tx block ${receipt.blockNumber.toString()}, chain head ${head.toString()})`,
+      };
+    }
+  } else if (finalityMode === 'safe' || finalityMode === 'finalized') {
+    // getHeadBlockNumber throws (fail closed) if the endpoint cannot answer
+    // this exact tag — verification then never credits and never degrades.
+    const head = await provider.getHeadBlockNumber(finalityMode);
+    if (receipt.blockNumber > head) {
+      return {
+        success: false,
+        failureReason:
+          `Transaction not ${finalityMode} yet: block ${receipt.blockNumber.toString()} ` +
+          `> ${finalityMode} head ${head.toString()} on "${input.network}"`,
+      };
+    }
+  } else if (finalityMode !== 'immediate' && !(finalityMode === 'count' && requiredConfirmations === 0)) {
+    throw new Error(`[Finality] Unknown finality_mode "${finalityMode}" for "${input.network}" — refusing to credit`);
+  }
 
   // 3. Successful receipt
   if (receipt.status !== 'success') {

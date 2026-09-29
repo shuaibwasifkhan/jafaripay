@@ -41,10 +41,38 @@ router.get('/', requireSessionOrApiKey, (req: Request, res: Response) => {
 router.get('/:id', requireSessionOrApiKey, (req: Request, res: Response) => {
   const ar = req as AuthedRequest;
   const db = getDb();
-  const payment = db.prepare(`SELECT p.*,p.amount_decimal AS amount,pi.order_id,pi.description,pi.metadata,pi.environment,pi.settlement_address,pi.expires_at FROM payments p JOIN payment_intents pi ON pi.id=p.payment_intent_id WHERE p.id=? AND p.merchant_id=?`).get(req.params.id, ar.merchantId!) as Record<string, unknown> | null;
+  const payment = db.prepare(`SELECT p.*,p.amount_decimal AS amount,pi.order_id,pi.description,pi.metadata,pi.environment,pi.network,pi.chain_id,pi.usdc_address,pi.currency,pi.settlement_address,pi.expires_at,pi.payment_link_id FROM payments p JOIN payment_intents pi ON pi.id=p.payment_intent_id WHERE p.id=? AND p.merchant_id=?`).get(req.params.id, ar.merchantId!) as Record<string, unknown> | null;
   if (!payment) { res.status(404).json({ error: 'Payment not found' }); return; }
   const btx = db.prepare('SELECT * FROM blockchain_transactions WHERE payment_id=?').get(req.params.id);
-  res.json({ ...payment, blockchain_transaction: btx || null });
+
+  // ── Phase F: additive reconciliation enrichment. Purely supplementary fields
+  // appended to the existing response shape (backward compatible). Everything is
+  // scoped to this merchant's payment/intent — the queries filter by the same
+  // merchant_id already proven above, so a foreign receipt/row can never attach.
+  // None of this affects the money path; it is a read-only reconciliation view.
+  const receipt = db.prepare(
+    'SELECT id,email_status,customer_email,explorer_url FROM receipts WHERE payment_id=? AND merchant_id=?'
+  ).get(req.params.id, ar.merchantId!) || null;
+
+  const webhooks = db.prepare(
+    `SELECT wd.event_type, wd.status, wd.attempts, wd.delivered_at
+       FROM webhook_deliveries wd
+       JOIN webhook_endpoints we ON we.id = wd.webhook_endpoint_id
+      WHERE wd.payment_intent_id = ? AND we.merchant_id = ?
+      ORDER BY wd.created_at DESC`
+  ).all(payment.payment_intent_id as string, ar.merchantId!);
+
+  // verification_state is a coarse, derived convenience label (does not gate money):
+  // a payments row only exists after a successful on-chain verification + credit.
+  const verification_state = 'verified';
+
+  res.json({
+    ...payment,
+    blockchain_transaction: btx || null,
+    verification_state,
+    receipt,
+    webhook_deliveries: webhooks,
+  });
 });
 
 export default router;

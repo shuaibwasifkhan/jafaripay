@@ -1,5 +1,6 @@
 import { getDb } from '../db/schema.js';
 import { processPendingDeliveries, enqueueWebhookDeliveries } from '../webhooks/delivery.js';
+import { processPendingReceiptEmails } from '../receipts/service.js';
 import { generateId } from '../lib/ids.js';
 import { PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
 
@@ -44,6 +45,10 @@ export async function tick(): Promise<void> {
 
   // Process pending webhook deliveries
   await processPendingDeliveries();
+
+  // Process pending receipt delivery emails (isolated from payment status —
+  // this only updates receipts.email_status, never payments/payment_intents).
+  await processPendingReceiptEmails();
 }
 
 function sleep(ms: number): Promise<void> {

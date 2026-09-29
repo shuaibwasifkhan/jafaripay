@@ -30,12 +30,25 @@ router.post('/', requireSession, (req: Request, res: Response) => {
   if (!['test','live'].includes(environment)) { res.status(400).json({ error: 'environment must be test or live' }); return; }
   try { new URL(url); } catch { res.status(400).json({ error: 'Invalid URL' }); return; }
 
-  const { secret, hash, preview } = generateAndHashWebhookSecret();
+  const { secret, hash, preview, ciphertext } = generateAndHashWebhookSecret();
   const db = getDb();
   const id = generateId('whe');
   const selectedEvents = events?.filter(e => VALID_EVENTS.includes(e)) || VALID_EVENTS;
-  db.prepare('INSERT INTO webhook_endpoints(id,merchant_id,url,secret_hash,secret_preview,description,events,environment) VALUES(?,?,?,?,?,?,?,?)').run(id, ar.merchantId!, url, hash, preview, description || '', JSON.stringify(selectedEvents), environment);
+  db.prepare('INSERT INTO webhook_endpoints(id,merchant_id,url,secret_hash,secret_preview,secret_ciphertext,description,events,environment) VALUES(?,?,?,?,?,?,?,?,?)').run(id, ar.merchantId!, url, hash, preview, ciphertext, description || '', JSON.stringify(selectedEvents), environment);
+  // The raw secret is returned EXACTLY ONCE here (never by GET/list/rotate-then-
+  // list). It is stored only as an AES-256-GCM ciphertext for signing.
   res.status(201).json({ id, url, description: description || '', events: selectedEvents, environment, secret, secret_preview: preview, is_active: true, created_at: Math.floor(Date.now() / 1000) });
+});
+
+// Rotate the signing secret. Old credential becomes invalid immediately (the
+// prior ciphertext/hash/preview are overwritten); new plaintext is shown once.
+router.post('/:id/rotate-secret', requireSession, (req: Request, res: Response) => {
+  const ar = req as AuthedRequest;
+  const db = getDb();
+  if (!db.prepare('SELECT id FROM webhook_endpoints WHERE id=? AND merchant_id=?').get(req.params.id, ar.merchantId!)) { res.status(404).json({ error: 'Not found' }); return; }
+  const { secret, hash, preview, ciphertext } = generateAndHashWebhookSecret();
+  db.prepare('UPDATE webhook_endpoints SET secret_hash=?,secret_preview=?,secret_ciphertext=?,updated_at=unixepoch() WHERE id=? AND merchant_id=?').run(hash, preview, ciphertext, req.params.id, ar.merchantId!);
+  res.json({ id: req.params.id, secret, secret_preview: preview, rotated: true });
 });
 
 router.delete('/:id', requireSession, (req: Request, res: Response) => {

@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { Card } from '../shared/Card';
 import { Badge } from '../shared/Badge';
 import { formatUSDC, formatDate, getStatusColor, getStatusLabel } from '../../lib/format';
+import { getChain } from '@/onchain-facts';
 import { toast } from 'sonner';
 
 interface Payment {
@@ -17,6 +18,7 @@ interface Payment {
   metadata: string | null;
   environment: string;
   network: string;
+  chain_id: number;
   settlement_address: string;
   expires_at: number;
   created_at: number;
@@ -26,6 +28,7 @@ interface Payment {
     block_number: number;
     from_address: string;
     network: string;
+    chain_id: number;
   } | null;
 }
 
@@ -70,9 +73,12 @@ export default function PaymentDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const explorerBase = payment?.network === 'arc_mainnet'
-    ? 'https://explorer.arc.io'
-    : 'https://explorer.testnet.arc.io';
+  // Resolve the explorer + display name from the generated onchain-facts registry
+  // keyed by the intent's pinned chain_id. Unknown chain → no explorer (never an
+  // Arc fallback). This replaces the old `network === 'arc_mainnet' ? … : …` logic.
+  const chainFact = payment ? getChain(payment.chain_id) : undefined;
+  const explorerBase = chainFact?.explorerBase ?? null;
+  const networkLabel = chainFact?.name ?? payment?.network?.replace('_', ' ') ?? 'Unknown network';
 
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading…</div>;
   if (notFound || !payment) return (
@@ -113,7 +119,7 @@ export default function PaymentDetailPage() {
         {payment.description && <Row label="Description"><span className="text-xs text-slate-600">{payment.description}</span></Row>}
         <Row label="Amount"><span className="text-xs font-semibold text-ink tabular-nums">{formatUSDC(payment.amount)} USDC</span></Row>
         <Row label="Status"><Badge className={getStatusColor(payment.status)}>{getStatusLabel(payment.status)}</Badge></Row>
-        <Row label="Network"><span className="text-xs text-slate-600">{payment.network.replace('_', ' ')}</span></Row>
+        <Row label="Network"><span className="text-xs text-slate-600">{networkLabel}</span></Row>
         <Row label="Environment"><Badge variant={payment.environment === 'live' ? 'error' : 'info'}>{payment.environment}</Badge></Row>
         <Row label="Settlement wallet"><CopyField value={payment.settlement_address} label="Settlement address" /></Row>
         <Row label="Expires"><span className="text-xs text-slate-500">{formatDate(payment.expires_at)}</span></Row>
@@ -130,10 +136,12 @@ export default function PaymentDetailPage() {
           <Row label="Transaction hash">
             <div className="flex items-center gap-2 justify-end">
               <span className="text-xs font-mono text-slate-600 truncate max-w-36">{payment.blockchain_transaction.tx_hash.slice(0, 18)}…</span>
-              <a href={`${explorerBase}/tx/${payment.blockchain_transaction.tx_hash}`} target="_blank" rel="noopener noreferrer"
-                className="p-1 rounded-md text-forest-700 hover:text-forest-800 hover:bg-forest-50 flex-shrink-0">
-                <ExternalLink size={11} />
-              </a>
+              {explorerBase && (
+                <a href={`${explorerBase}/tx/${payment.blockchain_transaction.tx_hash}`} target="_blank" rel="noopener noreferrer"
+                  className="p-1 rounded-md text-forest-700 hover:text-forest-800 hover:bg-forest-50 flex-shrink-0">
+                  <ExternalLink size={11} />
+                </a>
+              )}
             </div>
           </Row>
           <Row label="Sender"><CopyField value={payment.blockchain_transaction.from_address} label="Sender" /></Row>

@@ -12,6 +12,7 @@ import helmet from 'helmet';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { migrate } from './db/schema.js';
+import { CSP_CONNECT_SRC } from './lib/csp.js';
 import { requestId } from './middleware/auth.js';
 import { startWorker } from './workers/reconciliation.js';
 
@@ -25,6 +26,8 @@ import paymentsRouter from './api/payments.js';
 import webhooksRouter from './api/webhooks.js';
 import webhookDeliveriesRouter from './api/webhook-deliveries.js';
 import checkoutRouter from './api/checkout.js';
+import receiptsRouter from './api/receipts.js';
+import paymentLinksRouter, { payRouter } from './api/payment-links.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -35,7 +38,7 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // dev fallbacks in production would let anyone forge sessions or API keys.
 // Never log the values themselves, only which var is missing.
 if (IS_PROD) {
-  const requiredSecrets = ['SESSION_SECRET', 'API_KEY_HMAC_SECRET', 'WEBHOOK_HMAC_SECRET'];
+  const requiredSecrets = ['SESSION_SECRET', 'API_KEY_HMAC_SECRET', 'WEBHOOK_HMAC_SECRET', 'WEBHOOK_SIGNING_ENC_KEY'];
   const missing = requiredSecrets.filter((name) => {
     const v = process.env[name];
     return !v || v.length < 16;
@@ -64,7 +67,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"], // allow SDK embed
       styleSrc: ["'self'", "'unsafe-inline'"],
-      connectSrc: ["'self'", 'https://*.arc.io', 'https://*.arc.network', 'https://*.circle.com'],
+      connectSrc: [...CSP_CONNECT_SRC],
       imgSrc: ["'self'", 'data:', 'https:'],
       frameSrc: ["'none'"],
     },
@@ -130,6 +133,18 @@ app.use('/v1/payments', paymentsRouter);
 app.use('/api/v1/payment-intents', paymentIntentsRouter);
 app.use('/api/v1/payments', paymentsRouter);
 
+// Merchant receipts (list/detail/resend, isolated) + the public capability read.
+// Public /receipts/:id (customer page) and merchant /v1/receipts share the router;
+// the merchant-only handlers sit behind requireApiKey/requireSession inside it.
+app.use('/v1/receipts', receiptsRouter);
+app.use('/api/v1/receipts', receiptsRouter);
+app.use('/api/receipts', receiptsRouter); // public GET /:id used by /receipt/:id SPA page
+
+// Payment Links: merchant CRUD under /v1/payment-links, public checkout under /pay.
+app.use('/v1/payment-links', paymentLinksRouter);
+app.use('/api/v1/payment-links', paymentLinksRouter);
+app.use('/api/pay', payRouter);           // canonical JSON for the /pay/:id SPA page
+
 // Public checkout JSON API — canonical path, always available.
 // The frontend hosted checkout page (CheckoutPage.tsx) fetches from /api/checkout/:id.
 app.use('/api/checkout', checkoutRouter);
@@ -141,6 +156,7 @@ const distPath = join(import.meta.dir, '..', 'dist');
 const hasDist = existsSync(distPath);
 if (!hasDist) {
   app.use('/checkout', checkoutRouter);
+  app.use('/pay', payRouter);             // dev proxy path (Vite strips /api)
 }
 
 // Health check
@@ -188,6 +204,7 @@ if (hasDist) {
       || req.path.startsWith('/api/') || req.path.startsWith('/health')
       || req.path.startsWith('/projects') || req.path.startsWith('/api-keys')
       || req.path.startsWith('/settlement-wallets') || req.path.startsWith('/payments')
+      || req.path.startsWith('/receipts') || req.path.startsWith('/pay')
       || req.path.startsWith('/webhook');
     if (isApi) { res.status(404).json({ error: 'Not found' }); return; }
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');

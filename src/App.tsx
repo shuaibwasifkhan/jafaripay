@@ -13,6 +13,8 @@ import WebhooksPage from './components/dashboard/WebhooksPage';
 import DevelopersPage from './components/dashboard/DevelopersPage';
 import SettingsPage from './components/dashboard/SettingsPage';
 import CheckoutPage from './components/checkout/CheckoutPage';
+import ReceiptPage from './components/checkout/ReceiptPage';
+import PayLinkPage from './components/checkout/PayLinkPage';
 import DocsPage from './components/docs/DocsPage';
 import RoadmapPage from './components/landing/RoadmapPage';
 
@@ -95,6 +97,9 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<AuthPage />} />
           <Route path="/checkout/:id" element={<CheckoutPage />} />
+          {/* Public, capability-gated pages (unguessable id in the URL is the token). */}
+          <Route path="/receipt/:id" element={<ReceiptPage />} />
+          <Route path="/pay/:id" element={<PayLinkPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:slug" element={<DocsPage />} />
           <Route path="/roadmap" element={<RoadmapPage />} />

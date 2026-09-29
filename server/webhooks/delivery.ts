@@ -5,6 +5,7 @@
 import { createHmac, randomBytes } from 'crypto';
 import { getDb } from '../db/schema.js';
 import { generateId } from '../lib/ids.js';
+import { encryptSecret, decryptSecret } from '../lib/crypto.js';
 
 const RETRY_DELAYS_S = [10, 30, 120, 300, 1800, 7200, 28800];
 const MAX_ATTEMPTS = RETRY_DELAYS_S.length + 1;
@@ -55,13 +56,23 @@ export async function processPendingDeliveries(): Promise<void> {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
 
-  type DRow = { id: string; payload: string; attempts: number; url: string; secret_hash: string };
-  const pending = db.prepare(`SELECT wd.id,wd.payload,wd.attempts,we.url,we.secret_hash FROM webhook_deliveries wd JOIN webhook_endpoints we ON we.id=wd.webhook_endpoint_id WHERE wd.status IN ('pending','delivering') AND wd.next_attempt_at<=? AND wd.attempts<? LIMIT 20`).all(now, MAX_ATTEMPTS) as DRow[];
+  // Phase L (H-1): we sign with the endpoint's RAW secret, decrypted at signing
+  // time from secret_ciphertext. secret_hash is never used to sign (merchants
+  // hold the raw secret and verify HMAC(rawBody, rawSecret)). Endpoints created
+  // before Phase L have no ciphertext → fail closed (no send, no payment
+  // mutation) until the merchant rotates the secret once.
+  type DRow = { id: string; payload: string; attempts: number; url: string; secret_ciphertext: string | null };
+  const pending = db.prepare(`SELECT wd.id,wd.payload,wd.attempts,we.url,we.secret_ciphertext FROM webhook_deliveries wd JOIN webhook_endpoints we ON we.id=wd.webhook_endpoint_id WHERE wd.status IN ('pending','delivering') AND wd.next_attempt_at<=? AND wd.attempts<? LIMIT 20`).all(now, MAX_ATTEMPTS) as DRow[];
 
   for (const d of pending) {
     db.prepare("UPDATE webhook_deliveries SET status='delivering',updated_at=unixepoch() WHERE id=?").run(d.id);
+    const signingSecret = decryptSecret(d.secret_ciphertext);
+    if (!signingSecret) {
+      db.prepare("UPDATE webhook_deliveries SET status='failed',last_error=?,attempts=attempts+1,updated_at=unixepoch() WHERE id=?").run('signing_secret_unavailable: rotate this endpoint secret', d.id);
+      continue;
+    }
     const timestamp = Math.floor(Date.now() / 1000);
-    const signature = signWebhookPayload(d.secret_hash, d.payload, timestamp);
+    const signature = signWebhookPayload(signingSecret, d.payload, timestamp);
 
     // SSRF protection
     try {
@@ -103,10 +114,13 @@ export async function processPendingDeliveries(): Promise<void> {
   }
 }
 
-export function generateAndHashWebhookSecret(): { secret: string; hash: string; preview: string } {
+export function generateAndHashWebhookSecret(): { secret: string; hash: string; preview: string; ciphertext: string } {
   const secret = `whsec_${randomBytes(32).toString('hex')}`;
+  // hash: lifecycle/identity digest only (never used to sign deliveries).
   const hash = createHmac('sha256', process.env.WEBHOOK_HMAC_SECRET || 'dev-wh-secret').update(secret).digest('hex');
-  return { secret, hash, preview: secret.slice(-4) };
+  // ciphertext: AES-256-GCM envelope of the raw secret — the ONLY persisted form
+  // from which delivery signatures are produced (decrypted in memory at send).
+  return { secret, hash, preview: secret.slice(-4), ciphertext: encryptSecret(secret) };
 }
 
 export function hashWebhookSecret(secret: string): string {

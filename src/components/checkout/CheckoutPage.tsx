@@ -1,25 +1,28 @@
-import { useEffect, useReducer, useCallback, useMemo, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useReducer, useCallback, useMemo, useRef, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { useAccount, useSwitchChain, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
 import { ConnectKitButton } from 'connectkit';
 import { erc20Abi } from 'viem';
-import { Zap, ExternalLink, Shield, CheckCircle, AlertCircle, Clock, Loader2 } from 'lucide-react';
+import { Zap, ExternalLink, Shield, CheckCircle, AlertCircle, Clock, Loader2, Receipt as ReceiptIcon } from 'lucide-react';
 import { clsx } from 'clsx';
-import { getUsdc, buildTxExplorerUrl, buildAddressExplorerUrl, ONCHAIN_CHAINS } from '@/onchain-facts';
-import { Amount, usdcDecimalsFor } from '@/onchain-money';
+import { USDC_DECIMALS } from '@/onchain-facts';
+import { resolveCheckoutNetwork, isWrongNetwork } from '@/checkout-network';
+import { Amount } from '@/onchain-money';
 import { formatAddress, formatUSDC } from '../../lib/format';
-
-const ARC_TESTNET_ID = 5042002; // arc-studio-allow-onchain-literal
-const ARC_MAINNET_ID = 5042;    // arc-studio-allow-onchain-literal
 
 interface PaymentIntent {
   id: string; status: string; amount: string; amount_base_units: string;
-  currency: string; network: string; chain_id: number;
+  currency: string; network: string; chain_id: number; usdc_address: string;
   settlement_address: string; expires_at: number;
   merchant_name: string | null; order_id: string | null; description: string | null;
 }
 
 type CheckoutStep = 'loading' | 'ready' | 'wallet-sign' | 'confirming' | 'verifying' | 'succeeded' | 'failed' | 'expired' | 'cancelled';
+
+// Client-side mirror of the server's receipt-email guard. Purely advisory — the
+// server validates authoritatively and rejects a bad address BEFORE the money
+// path, so this only prevents an obviously-invalid value from being sent.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface State {
   step: CheckoutStep;
@@ -27,6 +30,7 @@ interface State {
   txHash: string | undefined;
   verifyError: string | null;
   nowSec: number;
+  receiptId: string | null;
 }
 
 type Action =
@@ -36,7 +40,7 @@ type Action =
   | { type: 'TX_HASH'; hash: string }
   | { type: 'CONFIRMING' }
   | { type: 'VERIFYING'; hash: string }
-  | { type: 'SUCCEEDED' }
+  | { type: 'SUCCEEDED'; receiptId?: string | null }
   | { type: 'FAILED'; error: string }
   | { type: 'EXPIRED' }
   | { type: 'TICK'; nowSec: number };
@@ -56,7 +60,7 @@ function reducer(s: State, a: Action): State {
     case 'TX_HASH':     return { ...s, txHash: a.hash, step: 'confirming' };
     case 'CONFIRMING':  return { ...s, step: 'confirming' };
     case 'VERIFYING':   return { ...s, txHash: a.hash, step: 'verifying' };
-    case 'SUCCEEDED':   return { ...s, step: 'succeeded' };
+    case 'SUCCEEDED':   return { ...s, step: 'succeeded', receiptId: a.receiptId ?? null };
     case 'FAILED':      return { ...s, step: 'failed', verifyError: a.error };
     case 'EXPIRED':     return { ...s, step: 'expired' };
     case 'TICK':        return { ...s, nowSec: a.nowSec };
@@ -71,9 +75,16 @@ export default function CheckoutPage() {
 
   const [state, dispatch] = useReducer(reducer, undefined, (): State => ({
     step: 'loading', intent: null, txHash: undefined, verifyError: null,
-    nowSec: Math.floor(Date.now() / 1000),
+    nowSec: Math.floor(Date.now() / 1000), receiptId: null,
   }));
-  const { step, intent, txHash, verifyError, nowSec } = state;
+  const { step, intent, txHash, verifyError, nowSec, receiptId } = state;
+
+  // Optional receipt email (Phase B). The state drives the input UI; a ref keeps
+  // the latest value readable inside the long-lived polling verify callback
+  // without adding it to that callback's deps. It is NEVER required and NEVER
+  // participates in the money/verification gate.
+  const [receiptEmail, setReceiptEmail] = useState('');
+  const receiptEmailRef = useRef('');
 
   // Fetch payment intent
   useEffect(() => {
@@ -119,29 +130,28 @@ export default function CheckoutPage() {
     }
   }, [step, id]);
 
-  const chainId = intent?.chain_id ?? ARC_TESTNET_ID;
-  const usdcFact = getUsdc(chainId);
+  // The Payment Intent is the sole network authority. While it loads, view is
+  // 'loading' with NO chain default (never Arc Testnet). An allowlisted chain
+  // that's missing from the frontend is 'unsupported' and blocks payment.
+  const view = useMemo(() => resolveCheckoutNetwork(intent), [intent]);
+  const chainId = view.chainId; // null until the intent is known
+  const intentChainId = intent?.chain_id ?? null;
 
-  const chain = useMemo(
-    () => ONCHAIN_CHAINS.find(c => c.chainId === chainId) ?? null,
-    [chainId]
-  );
-
-  // USDC balance
+  // USDC balance — read the intent's PINNED usdc_address on the intent's chain.
   const { data: usdcBalance } = useReadContract({
-    address: usdcFact?.address as `0x${string}` | undefined,
+    address: (view.usdcAddress ?? undefined) as `0x${string}` | undefined,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
-    chainId,
-    query: { enabled: !!address && !!usdcFact },
+    chainId: chainId ?? undefined,
+    query: { enabled: !!address && view.isSupported && chainId != null },
   });
 
   const formattedBalance = usdcBalance != null
-    ? Amount.fromRaw(usdcBalance, usdcDecimalsFor(chainId)).toFixed(2)
+    ? Amount.fromRaw(usdcBalance, USDC_DECIMALS).toFixed(2)
     : null;
 
-  const isWrongChain = isConnected && walletChainId !== chainId;
+  const isWrongChain = isConnected && isWrongNetwork(walletChainId, chainId);
 
   // Write contract
   const { writeContract, data: hash, isPending: isWalletPending, error: writeError } = useWriteContract();
@@ -151,6 +161,7 @@ export default function CheckoutPage() {
   const verifyingRef = useRef(false);
   const verifyPayment = useCallback(async (txh: string) => {
     if (verifyingRef.current) return;
+    if (intentChainId == null) return; // never verify against an unknown/undefaulted chain
     verifyingRef.current = true;
     for (let attempt = 0; attempt < 20; attempt++) {
       await new Promise<void>(r => setTimeout(r, 3000));
@@ -158,12 +169,18 @@ export default function CheckoutPage() {
         const res = await fetch(`/api/checkout/${id}/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tx_hash: txh, chain_id: chainId }),
+          body: JSON.stringify({
+            tx_hash: txh, chain_id: intentChainId,
+            // Optional receipt destination. Empty is omitted; the server rejects
+            // a malformed one with 400 BEFORE the money path, so it is validated
+            // client-side too and never sent as a bad value.
+            ...(receiptEmailRef.current.trim() ? { receipt_email: receiptEmailRef.current.trim() } : {}),
+          }),
         });
-        const data = await res.json() as { status?: string; error?: string };
+        const data = await res.json() as { status?: string; error?: string; receipt_id?: string };
 
         // Terminal outcomes — stop polling immediately.
-        if (data.status === 'succeeded') { dispatch({ type: 'SUCCEEDED' }); verifyingRef.current = false; return; }
+        if (data.status === 'succeeded') { dispatch({ type: 'SUCCEEDED', receiptId: data.receipt_id ?? null }); verifyingRef.current = false; return; }
         if (data.status === 'expired') { dispatch({ type: 'EXPIRED' }); verifyingRef.current = false; return; }
         if (data.status === 'failed') { dispatch({ type: 'FAILED', error: data.error ?? 'Verification failed' }); verifyingRef.current = false; return; }
 
@@ -178,7 +195,7 @@ export default function CheckoutPage() {
     }
     dispatch({ type: 'FAILED', error: 'Verification timed out. Contact the merchant with your transaction hash.' });
     verifyingRef.current = false;
-  }, [id, chainId]);
+  }, [id, intentChainId]);
 
   // React to wagmi tx hash appearing — use ref to avoid re-running on step changes
   const prevHash = useRef<string | undefined>();
@@ -214,10 +231,11 @@ export default function CheckoutPage() {
   }, [writeError, step, intent]);
 
   const handlePay = () => {
-    if (!intent || !usdcFact || !isConnected) return;
+    if (!intent || !view.isSupported || view.usdcAddress == null || chainId == null) return;
+    if (!isConnected || isWrongChain || isExpired) return;
     dispatch({ type: 'PAY' });
     writeContract({
-      address: usdcFact.address as `0x${string}`,
+      address: view.usdcAddress as `0x${string}`,
       abi: erc20Abi,
       functionName: 'transfer',
       args: [intent.settlement_address as `0x${string}`, BigInt(intent.amount_base_units)],
@@ -227,12 +245,9 @@ export default function CheckoutPage() {
 
   const expirySecs = intent?.expires_at != null ? intent.expires_at - nowSec : null;
   const isExpired = expirySecs !== null && expirySecs <= 0;
-  const networkName = chainId === ARC_MAINNET_ID ? 'Arc' : 'Arc Testnet';
-  const explorerTx = useMemo(() => txHash ? buildTxExplorerUrl(chainId, txHash) : null, [txHash, chainId]);
-  const explorerSettlement = useMemo(() => intent ? buildAddressExplorerUrl(chainId, intent.settlement_address) : null, [intent, chainId]);
-
-  // Unused var suppressor for chain (used conditionally below)
-  void chain;
+  const networkName = view.displayName ?? 'Unavailable network';
+  const explorerTx = txHash ? view.txExplorerUrl(txHash) : null;
+  const explorerSettlement = intent ? view.addressExplorerUrl(intent.settlement_address) : null;
 
   return (
         <div className="min-h-dvh bg-cream flex items-center justify-center px-4 py-12">
@@ -292,6 +307,12 @@ export default function CheckoutPage() {
                     className="flex items-center gap-1.5 text-xs text-forest-700 hover:text-forest-800">
                     <ExternalLink size={11} /> View transaction
                   </a>
+                )}
+                {receiptId && (
+                  <Link to={`/receipt/${receiptId}`}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-white bg-forest-700 hover:bg-forest-600 rounded-xl px-4 py-2.5 mt-1 transition-all">
+                    <ReceiptIcon size={14} /> View your receipt
+                  </Link>
                 )}
               </div>
             )}
@@ -373,7 +394,27 @@ export default function CheckoutPage() {
                 )}
 
                 {/* Wallet section */}
-                {!isConnected ? (
+                {!view.isSupported ? (
+                  /* Unavailable / unsupported network — never fall back to Arc */
+                  <div className="flex flex-col items-center gap-3 py-4 text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
+                      <AlertCircle size={24} className="text-red-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-ink mb-1">Network unavailable</p>
+                      <p className="text-xs text-slate-500">
+                        {intent.chain_id != null
+                          ? `This payment is pinned to an unknown network (chain ${intent.chain_id}).`
+                          : 'This checkout cannot determine the payment network.'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">Payment is disabled to protect your funds. Contact the merchant.</p>
+                    </div>
+                    <button disabled
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-semibold text-sm bg-sand-300 text-slate-400 cursor-not-allowed">
+                      Payment unavailable
+                    </button>
+                  </div>
+                ) : !isConnected ? (
                   <ConnectKitButton.Custom>
                     {({ show }) => (
                       <button onClick={show}
@@ -410,7 +451,7 @@ export default function CheckoutPage() {
                           <p className="text-xs text-gold-800">Switch to {networkName}</p>
                         </div>
                         <button
-                          onClick={() => switchChain({ chainId })}
+                          onClick={() => { if (chainId != null) switchChain({ chainId }); }}
                           disabled={isSwitching}
                           className="text-xs font-medium text-gold-700 hover:text-gold-800 disabled:opacity-50 transition-colors"
                         >
@@ -430,6 +471,26 @@ export default function CheckoutPage() {
                           </a>
                         )}
                       </div>
+                    </div>
+
+                    {/* Receipt email (optional, Phase B). Purely additive: a
+                        customer may ask for a emailed receipt. It never gates the
+                        payment; the server is the authority on validity. */}
+                    <div className="space-y-1">
+                      <label htmlFor="receipt-email" className="text-xs text-slate-500">Email me a receipt (optional)</label>
+                      <input
+                        id="receipt-email"
+                        type="email"
+                        inputMode="email"
+                        autoComplete="email"
+                        value={receiptEmail}
+                        onChange={(e) => { setReceiptEmail(e.target.value); receiptEmailRef.current = e.target.value; }}
+                        placeholder="you@example.com"
+                        className="w-full px-3 py-2.5 rounded-xl bg-sand-100 border border-sand-200 text-sm text-ink placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-forest-500/40 focus:border-forest-400 transition-all"
+                      />
+                      {receiptEmail.trim() !== '' && !EMAIL_RE.test(receiptEmail.trim()) && (
+                        <p className="text-[11px] text-gold-700">That does not look like a valid email — the receipt link will still work regardless.</p>
+                      )}
                     </div>
 
                     {/* Pay button */}

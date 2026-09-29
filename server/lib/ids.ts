@@ -19,6 +19,17 @@ export function generatePaymentIntentId(): string {
   return `pi_${randomString(24)}`;
 }
 
+// Receipt and payment-link IDs are unguessable (24 random base-36 chars) — the
+// public /receipt/:id and /pay/:id pages authorize by capability (the secret id)
+// and are NOT enumerable, so receipt IDs cannot be guessed or walked (Phase H).
+export function generateReceiptId(): string {
+  return `rcpt_${randomString(24)}`;
+}
+
+export function generatePaymentLinkId(): string {
+  return `plink_${randomString(24)}`;
+}
+
 export function generateApiKey(prefix: string): { fullKey: string; prefix: string; preview: string } {
   const secret = randomString(32);
   const fullKey = `${prefix}${secret}`;

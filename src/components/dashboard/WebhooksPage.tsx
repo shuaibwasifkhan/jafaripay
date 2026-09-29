@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Webhook, Plus, Trash2, CheckCircle, XCircle, AlertCircle, RotateCcw } from 'lucide-react';
+import { Webhook, Plus, Trash2, CheckCircle, XCircle, AlertCircle, RotateCcw, Copy, KeyRound } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
@@ -39,6 +39,11 @@ export default function WebhooksPage() {
   const [selectedEvents, setSelectedEvents] = useState<string[]>(['payment.succeeded']);
   const [saving, setSaving] = useState(false);
   const [urlError, setUrlError] = useState('');
+  // Reveal-once: the raw signing secret is only ever available immediately after
+  // create/rotate. We keep it in component state (never persisted) until the
+  // merchant dismisses the banner; then it is gone from the UI forever.
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
 
   const load = () => {
     Promise.all([
@@ -63,13 +68,32 @@ export default function WebhooksPage() {
     if (selectedEvents.length === 0) { toast.error('Select at least one event'); return; }
     setSaving(true);
     try {
-      await api.post('/webhook-endpoints', { url: url.trim(), events: selectedEvents, enabled: true });
+      const res = await api.post<{ secret?: string }>('/webhook-endpoints', { url: url.trim(), events: selectedEvents, enabled: true });
       toast.success('Webhook endpoint created');
+      if (res.secret) setRevealedSecret(res.secret);
       setCreating(false); setUrl(''); setSelectedEvents(['payment.succeeded']);
       load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setSaving(false); }
+  };
+
+  const rotateSecret = async (id: string) => {
+    if (!confirm('Rotate this endpoint\'s signing secret? The old secret will stop working immediately and any in-flight deliveries signed with it will fail verification.')) return;
+    setRotating(true);
+    try {
+      const res = await api.post<{ secret?: string }>(`/webhook-endpoints/${id}/rotate-secret`);
+      toast.success('Signing secret rotated');
+      if (res.secret) setRevealedSecret(res.secret);
+      load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed'); }
+    finally { setRotating(false); }
+  };
+
+  const copySecret = async () => {
+    if (!revealedSecret) return;
+    try { await navigator.clipboard.writeText(revealedSecret); toast.success('Secret copied'); }
+    catch { toast.error('Copy failed — select and copy manually'); }
   };
 
   const deleteEndpoint = async (id: string) => {
@@ -111,6 +135,22 @@ export default function WebhooksPage() {
 
       {tab === 'endpoints' && (
         <>
+          {revealedSecret && (
+            <Card className="p-5 mb-6 border-gold-300 bg-gold-50">
+              <div className="flex items-start gap-3">
+                <KeyRound size={18} className="text-gold-700 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-sm font-semibold text-ink mb-1">Copy your signing secret now — it is shown only once</h2>
+                  <p className="text-xs text-slate-600 mb-3">Store it in your environment now. JafariPay keeps only an encrypted copy for signing and can never display it again. If you lose it, rotate to get a new one.</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 min-w-0 truncate px-3 py-2 rounded-lg bg-white border border-gold-200 text-xs font-mono text-ink">{revealedSecret}</code>
+                    <Button size="sm" variant="secondary" onClick={() => { void copySecret(); }}><Copy size={13} /> Copy</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRevealedSecret(null)}>Done</Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
           {creating && (
             <Card className="p-6 mb-6">
               <h2 className="text-sm font-semibold text-ink mb-4">New webhook endpoint</h2>
@@ -171,9 +211,14 @@ export default function WebhooksPage() {
                           Secret: <code className="text-slate-400">…{ep.secret_preview}</code> · Created {formatDate(ep.created_at)}
                         </p>
                       </div>
-                      <button onClick={() => { void deleteEndpoint(ep.id); }} className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-all">
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { void rotateSecret(ep.id); }} disabled={rotating} title="Rotate signing secret" className="text-slate-400 hover:text-forest-700 p-1.5 rounded-lg hover:bg-forest-50 transition-all disabled:opacity-50">
+                          <KeyRound size={13} />
+                        </button>
+                        <button onClick={() => { void deleteEndpoint(ep.id); }} className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-all">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

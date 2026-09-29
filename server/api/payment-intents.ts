@@ -10,6 +10,8 @@ import { generatePaymentIntentId, generateId } from '../lib/ids.js';
 import { validatePositiveAmount, formatBaseUnitsToDecimal } from '../lib/money.js';
 import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
 import { enqueueWebhookDeliveries } from '../webhooks/delivery.js';
+import { issueReceiptForPayment } from '../receipts/service.js';
+import { isValidEmail, normalizeEmail } from '../email/transport.js';
 
 const router = Router();
 const CHECKOUT_BASE = process.env.CHECKOUT_BASE_URL || 'https://jafari.co.in';
@@ -45,6 +47,25 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
     metadata?: Record<string, unknown>; settlement_wallet_id?: string;
   };
 
+  // Optional customer receipt destination. Accepts a top-level `receipt_email`
+  // (or `customer.email` for a future object-shaped API). It is stored verbatim
+  // (normalized) and NEVER participates in the money/verification gate. Absent →
+  // NULL, so every existing integration is unaffected. An explicitly-supplied
+  // but malformed address is refused up front (400 invalid_email) rather than
+  // persisted — this is the "invalid email" guard for the receipt pipeline.
+  const rawEmail = (req.body as { receipt_email?: unknown; customer?: { email?: unknown } });
+  const emailCandidate = typeof rawEmail.receipt_email === 'string'
+    ? rawEmail.receipt_email
+    : (rawEmail.customer && typeof (rawEmail.customer as { email?: unknown }).email === 'string'
+        ? (rawEmail.customer as { email: string }).email : undefined);
+  let customerEmail: string | null = null;
+  if (emailCandidate !== undefined && emailCandidate !== null && emailCandidate !== '') {
+    if (!isValidEmail(emailCandidate)) {
+      res.status(400).json({ error: 'receipt_email is not a valid email address', code: 'invalid_email' }); return;
+    }
+    customerEmail = normalizeEmail(emailCandidate);
+  }
+
   if (!amount) { res.status(400).json({ error: 'amount is required' }); return; }
   if (currency !== 'USDC') { res.status(400).json({ error: 'Only USDC is supported' }); return; }
 
@@ -52,8 +73,41 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
   try { amountBaseUnits = validatePositiveAmount(amount); }
   catch (err) { res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid amount' }); return; }
 
-  const network = env === 'live' ? 'arc_mainnet' : 'arc_testnet';
+  // Optional network selector. When omitted, preserve today's exact
+  // environment-derived default (live -> arc_mainnet, test -> arc_testnet).
+  // `network` is the single documented slug-based selector; we deliberately do
+  // NOT add a second chain_id-based way to choose a network.
+  const requestedNetwork = (req.body as { network?: unknown }).network;
+  let network: string;
+  if (requestedNetwork === undefined || requestedNetwork === null || requestedNetwork === '') {
+    network = env === 'live' ? 'arc_mainnet' : 'arc_testnet';
+  } else if (typeof requestedNetwork === 'string') {
+    network = requestedNetwork.trim();
+  } else {
+    res.status(400).json({ error: 'network must be a string slug', code: 'invalid_network' }); return;
+  }
 
+  // Resolve + validate the selected network against the registry. network_configs
+  // is the source of truth for chain_id / usdc_address and the testnet/live class
+  // (is_testnet, Phase 1). Unknown or disabled rows are not selectable.
+  type NetRow = { chain_id: number; usdc_address: string; is_enabled: number; is_testnet: number };
+  const netConfig = db.prepare('SELECT chain_id,usdc_address,is_enabled,is_testnet FROM network_configs WHERE network=?').get(network) as NetRow | null;
+  if (!netConfig || netConfig.is_enabled !== 1) {
+    res.status(400).json({ error: `Network "${network}" is unknown or disabled`, code: 'invalid_network' }); return;
+  }
+
+  // Environment-class enforcement: a live key may only create mainnet-class
+  // intents; a test key only testnet-class intents. No override is possible.
+  const expectedIsTestnet = env === 'test' ? 1 : 0;
+  if (netConfig.is_testnet !== expectedIsTestnet) {
+    res.status(400).json({
+      error: `Network "${network}" is ${netConfig.is_testnet ? 'testnet' : 'mainnet'}-class and does not match API key environment "${env}"`,
+      code: 'environment_network_mismatch',
+    }); return;
+  }
+
+  // Settlement wallet must belong to this merchant, be active, and match the
+  // selected network — reuses the existing per-network wallet architecture.
   type SwRow = { id: string; address: string; network: string };
   let sw: SwRow | null = null;
   if (settlement_wallet_id) {
@@ -66,17 +120,13 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
     if (!sw) { res.status(400).json({ error: 'No settlement wallet configured. Add one in the dashboard.', code: 'setup.no_settlement_wallet' }); return; }
   }
 
-  type NetRow = { chain_id: number; usdc_address: string };
-  const netConfig = db.prepare('SELECT chain_id,usdc_address FROM network_configs WHERE network=?').get(network) as NetRow | null;
-  if (!netConfig) { res.status(500).json({ error: 'Network not configured' }); return; }
-
   const id = generatePaymentIntentId();
   const expiresAt = Math.floor(Date.now() / 1000) + PI_EXPIRY_S;
   // Preserve original input string for display (e.g. "1.00" not "1.000000")
   const amountDecimal = amount.trim();
 
-  db.prepare(`INSERT INTO payment_intents(id,merchant_id,project_id,settlement_wallet_id,settlement_address,network,chain_id,usdc_address,amount_decimal,amount_base_units,currency,order_id,description,metadata,environment,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, merchantId, projectId, sw.id, sw.address, network, netConfig.chain_id, netConfig.usdc_address, amountDecimal, amountBaseUnits.toString(), currency, order_id || null, description || '', JSON.stringify(metadata), env, expiresAt);
+  db.prepare(`INSERT INTO payment_intents(id,merchant_id,project_id,settlement_wallet_id,settlement_address,network,chain_id,usdc_address,amount_decimal,amount_base_units,currency,order_id,description,metadata,environment,expires_at,customer_email) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, merchantId, projectId, sw.id, sw.address, network, netConfig.chain_id, netConfig.usdc_address, amountDecimal, amountBaseUnits.toString(), currency, order_id || null, description || '', JSON.stringify(metadata), env, expiresAt, customerEmail);
 
   db.prepare('INSERT INTO payment_events(id,payment_intent_id,event_type,to_status) VALUES(?,?,?,?)').run(generateId('pe'), id, 'payment.created', 'requires_payment');
 
@@ -154,12 +204,26 @@ router.post('/:id/cancel', requireApiKey({ requireSecret: true }), (req: Request
 router.post('/:id/verify', requireApiKey(), async (req: Request, res: Response) => {
   const ar = req as AuthedRequest;
   const db = getDb();
-  const { tx_hash } = req.body as { tx_hash: string };
+  const { tx_hash, chain_id } = req.body as { tx_hash: string; chain_id?: number };
   if (!tx_hash) { res.status(400).json({ error: 'tx_hash is required' }); return; }
 
   type PiFullRow = { id: string; status: string; network: string; settlement_address: string; amount_base_units: string; usdc_address: string; chain_id: number; amount_decimal: string; environment: string; merchant_id: string; expires_at: number };
   const pi = db.prepare('SELECT * FROM payment_intents WHERE id=? AND merchant_id=?').get(req.params.id, ar.merchantId!) as PiFullRow | null;
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
+
+  // chain_id is REQUIRED and must equal the PI's pinned chain_id. The persisted
+  // PI row is the source of truth (verification below uses ONLY the PI snapshot,
+  // never the client value); a missing/mismatched chain_id is rejected BEFORE
+  // the intent is transitioned to processing or any verification is attempted.
+  if (chain_id === undefined || chain_id === null || (chain_id as unknown) === '') {
+    res.status(400).json({ error: 'chain_id is required', code: 'wrong_network' }); return;
+  }
+  if (Number(chain_id) !== Number(pi.chain_id)) {
+    res.status(400).json({
+      error: `Chain ID mismatch: payment intent requires chain ${pi.chain_id} (${pi.network}), got ${chain_id}`,
+      code: 'wrong_network',
+    }); return;
+  }
 
   if (pi.status === 'succeeded') {
     res.json({ status: 'succeeded', payment: db.prepare('SELECT * FROM payments WHERE payment_intent_id=?').get(pi.id) }); return;
@@ -231,7 +295,11 @@ router.post('/:id/verify', requireApiKey(), async (req: Request, res: Response) 
 
   const paymentRow = db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId!) as Record<string, unknown>;
   enqueueWebhookDeliveries(pi.id, 'payment.succeeded', { payment_intent_id: pi.id, payment: paymentRow }, pi.environment as 'test' | 'live');
-  res.json({ status: 'succeeded', payment: paymentRow });
+  // Generate the customer receipt AFTER the payment is confirmed succeeded.
+  // Isolated: a receipt/email error can never un-succeed the payment (the row is
+  // already committed and this call is guaranteed non-throwing).
+  const receipt = await issueReceiptForPayment(paymentId!);
+  res.json({ status: 'succeeded', payment: paymentRow, receipt_id: receipt?.id ?? null });
 });
 
 export default router;
