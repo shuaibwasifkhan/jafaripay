@@ -2,9 +2,9 @@ import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   Zap, Globe, Target, ShoppingCart, ShieldCheck, Wallet, Webhook, Key, Receipt,
-  Globe2, Link2, Repeat, Bot, SlidersHorizontal, Fingerprint, Landmark,
+  Link2, Repeat, Bot, SlidersHorizontal, Fingerprint, Landmark,
   Shield, Coins, Crosshair, Code2, MessageSquare, ArrowUpRight,
-  BookOpen, Map, Github, Mail,
+  BookOpen, Map, Github, Mail, ArrowLeftRight, FileText, LayoutDashboard,
 } from 'lucide-react';
 
 const GITHUB_URL = 'https://github.com/shuaibwasifkhan/jafaripay';
@@ -42,7 +42,7 @@ const PHASES: Phase[] = [
     badge: 'Live now',
     status: 'Live',
     title: 'Shipping today',
-    sub: 'The core USDC payment rail on Arc — built, on-chain verified, and ready to integrate.',
+    sub: 'The core USDC payment rail — multi-chain, on-chain verified, and ready to integrate.',
     cols: 'lg:grid-cols-4',
     accent: {
       badge: 'text-forest-700 bg-forest-50 border-forest-200',
@@ -52,14 +52,17 @@ const PHASES: Phase[] = [
       cardHover: 'hover:border-forest-200',
     },
     items: [
-      { icon: Globe, title: 'Arc Mainnet Payments', desc: 'Accept USDC on Arc Mainnet (chain 5042) with sub-second finality and native gas.' },
-      { icon: Target, title: 'Payment Intents', desc: 'Server-side intents carry amount, currency, and order metadata. Idempotent by design.' },
-      { icon: ShoppingCart, title: 'Hosted Checkout', desc: 'One SDK call: wallet connect, chain switch, and USDC transfer handled for you.' },
+      { icon: Globe, title: 'Multi-Chain USDC', desc: 'Accept native USDC across 10 supported EVM mainnets — Arc, Base, Arbitrum, Polygon, Avalanche, Optimism, Linea, Unichain, zkSync Era, and Celo.' },
+      { icon: Target, title: 'Payment Intents', desc: 'Server-side intents pin amount, currency, network, and order metadata. Idempotent by design.' },
+      { icon: ShoppingCart, title: 'Hosted Checkout', desc: 'One integration: wallet connect, network switch, and USDC transfer handled for you.' },
       { icon: ShieldCheck, title: 'On-Chain Verification', desc: 'Token contract, recipient, and exact amount verified against the ERC-20 Transfer event.' },
       { icon: Wallet, title: 'Direct Merchant Settlement', desc: 'Non-custodial transfers from your customer straight to your settlement wallet.' },
+      { icon: Link2, title: 'Payment Links', desc: 'Shareable USDC payment links from the dashboard — no customer-side integration required.' },
+      { icon: Receipt, title: 'Receipts', desc: 'Automatic on-chain receipts, emailed to customers and viewable via a public link.' },
+      { icon: ArrowLeftRight, title: 'Payment Reconciliation', desc: 'Every intent matched to a settled on-chain transfer, auditable in one ledger view.' },
       { icon: Webhook, title: 'Signed Webhooks', desc: 'HMAC-SHA256 signed payment events with automatic retries and replay protection.' },
       { icon: Key, title: 'API Keys', desc: 'Scoped test and live keys with project isolation, managed from the dashboard.' },
-      { icon: Receipt, title: 'Payment Reconciliation', desc: 'Every intent matched to a settled on-chain transfer, auditable in one ledger view.' },
+      { icon: Code2, title: 'JavaScript SDK', desc: 'A drop-in /sdk.js build that launches the hosted checkout and reports the outcome.' },
     ],
   },
   {
@@ -77,9 +80,9 @@ const PHASES: Phase[] = [
       cardHover: 'hover:border-teal-200',
     },
     items: [
-      { icon: Globe2, title: 'Multi-Chain USDC', desc: 'Same API, more networks — USDC payments across additional chains and bridges.' },
-      { icon: Link2, title: 'Payment Links & Invoices', desc: 'Shareable payment links and generated invoices that settle in USDC — no integration required.' },
-      { icon: Repeat, title: 'Advanced Billing', desc: 'Subscriptions, proration, and dunning handled in USDC for recurring SaaS revenue.' },
+      { icon: FileText, title: 'Invoices', desc: 'Generate and track USDC invoices tied to payment intents, with delivery and payment status.' },
+      { icon: Repeat, title: 'Recurring USDC Billing', desc: 'Subscriptions and scheduled recurring USDC charges for SaaS and membership revenue.' },
+      { icon: LayoutDashboard, title: 'Merchant Reporting', desc: 'Richer merchant tooling — reporting, filters, and exports across payments and settlements.' },
     ],
   },
   {
@@ -153,18 +156,18 @@ export default function RoadmapPage() {
       <section className="max-w-4xl mx-auto px-6 pt-12 sm:pt-16 lg:pt-20 pb-14 lg:pb-16 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-forest-50 border border-forest-200 text-xs text-forest-700 mb-8">
           <span className="w-1.5 h-1.5 rounded-full bg-forest-500 animate-pulse" />
-          Product roadmap · JafariPay on Arc
+          Product roadmap · Universal USDC payments
         </div>
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-ink mb-6 leading-[1.05]" style={{ letterSpacing: '-0.03em', ...GROTESK }}>
           JafariPay Roadmap
         </h1>
         <p className="text-lg sm:text-xl text-slate-600 mb-4 text-pretty leading-relaxed max-w-2xl mx-auto">
-          Building the future of programmable USDC payments on Arc.
+          Building the future of programmable USDC payment infrastructure across supported networks.
         </p>
         <p className="text-sm sm:text-base text-slate-500 leading-relaxed max-w-2xl mx-auto">
-          This roadmap is a living document, not a delivery schedule. The plan evolves with the Arc
-          ecosystem and builder feedback — labels like Live, Next, Exploring, and Future describe
-          direction, not dates.
+          This roadmap is a living document, not a delivery schedule. The plan evolves with the
+          multichain USDC ecosystem and builder feedback — labels like Live, Next, Exploring, and
+          Future describe direction, not dates.
         </p>
       </section>
 

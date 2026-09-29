@@ -1,6 +1,6 @@
-# JafariPay — Open-Source USDC Payment Infrastructure for Arc
+# JafariPay — Universal Multi-Chain USDC Payment Infrastructure
 
-A non-custodial developer payment infrastructure for accepting USDC through Payment Intents, hosted checkout, independent on-chain verification, direct merchant settlement, and signed webhooks — built on [Arc](https://arc.io).
+A non-custodial developer payment infrastructure for accepting USDC through Payment Intents, hosted checkout, Payment Links, independent on-chain verification, direct merchant settlement, receipts, reconciliation, and signed webhooks — across 10 supported EVM mainnets.
 
 ## Links
 
@@ -18,43 +18,49 @@ All of the following are implemented in this repository:
 
 - **Payment Intent API** — create/read/verify/cancel USDC payment intents (`/v1/payment-intents`).
 - **Hosted checkout** — a React checkout page (`/checkout/:id`) that connects a wallet and sends the USDC transfer.
-- **Independent on-chain verification** — the backend re-verifies every payment against Arc RPC; frontend success is never trusted.
+- **Payment Links** — shareable hosted USDC links (`/v1/payment-links`, public `/pay/:id`) that mint a payment intent on click — no customer-side integration.
+- **Independent on-chain verification** — the backend re-verifies every payment against the target network's RPC; frontend success is never trusted.
 - **Direct merchant settlement** — customer USDC is transferred straight to the merchant's configured settlement wallet.
-- **Signed webhooks** — HMAC-SHA256 signed event deliveries with automatic retries.
+- **Signed webhooks** — HMAC-SHA256 signed event deliveries (`X-JafariPay-Signature`) with automatic retries.
+- **Receipts** — automatic on-chain receipts, emailed to customers and viewable via a public capability link (`/api/receipts/:id`).
 - **Idempotency protection** — `Idempotency-Key` support on Payment Intent creation.
 - **Duplicate/replay protection** — a settled transaction hash can never be credited twice.
 - **Reconciliation worker** — background expiry, stuck-state recovery, and webhook delivery; every intent is matched to its settled on-chain transfer in a single auditable ledger view.
-- **Merchant dashboard** — projects, settlement wallets, API keys, payments, and webhooks.
+- **JavaScript SDK** — a standalone IIFE build served at `/sdk.js` that launches the hosted checkout and reports the outcome.
+- **Merchant dashboard** — projects, settlement wallets, API keys, payments, webhooks, links, and receipts.
 - **Wallet-based authentication** — merchants sign in with SIWE / EIP-4361; no email or password.
-- **Testnet + Mainnet networks** — Arc Testnet (default) and Arc Mainnet, with live payments gated behind an explicit flag.
+- **Multi-chain native USDC** — accept USDC across 10 supported EVM mainnets (plus clearly-separated development testnets), gated per environment by an explicit flag.
 
-## Live capabilities
+## Capabilities
 
-Available today in production (testnet and Arc Mainnet):
+Implemented and available to integrate (across the supported production EVM mainnets; development testnets are separate and labelled as such):
 
-- **Arc Mainnet Payments** — real USDC transfers on Arc Mainnet; live payments gated behind an explicit flag
+- **Multi-Chain USDC** — native USDC on 10 supported EVM mainnets (Arc, Base, Arbitrum, Polygon PoS, Avalanche C, OP Mainnet, Linea, Unichain, zkSync Era, Celo)
 - **Payment Intents** — create, read, verify, cancel (`/v1/payment-intents`)
 - **Hosted Checkout** — wallet-connected checkout page (`/checkout/:id`)
-- **On-chain Payment Verification** — backend re-verifies every transfer against Arc RPC
+- **Payment Links** — shareable hosted USDC links (`/pay/:id`)
+- **On-chain Payment Verification** — backend re-verifies every transfer against the network's RPC
 - **Direct Merchant Settlement** — customer USDC lands in the merchant's settlement wallet
-- **Signed Webhooks** — HMAC-SHA256 event deliveries with retries
+- **Signed Webhooks** — HMAC-SHA256 event deliveries with retries and replay protection
+- **Receipts** — automatic on-chain receipts with email + public link
 - **API Keys** — per-project `pk_`/`sk_` key pairs (test and live)
 - **Payment Reconciliation** — background expiry, stuck-state recovery, and webhook delivery
+- **JavaScript SDK** — drop-in `/sdk.js` checkout launcher
 - **Wallet-based Authentication** — SIWE / EIP-4361 sign-in for the merchant dashboard
 
-Roadmap items (Payment Links, Invoices, Recurring Billing, Multi-chain USDC, Agent Payments, Payment Firewall, Payment Passport) are **not** currently available — see the public roadmap for their status.
+Planned / future (**not** yet available): **Invoices, Recurring & Advanced Billing, Agent/M2M payments, Payment Firewall** — see the public roadmap for their status. Multi-chain USDC, Payment Links, Receipts, and webhooks are shipped.
 
 ## Payment flow
 
 ```
 Merchant → Payment Intent API → Hosted Checkout → Customer Wallet
-        → Arc USDC Transfer → Independent On-chain Verification
-        → Merchant Settlement → Signed Webhook
+        → On-chain USDC Transfer (supported network) → Independent Verification
+        → Merchant Settlement → Signed Webhook → Reconciliation + Receipt
 ```
 
 ## Documentation
 
-The public developer documentation lives at https://jafari.co.in/docs and covers: Quickstart, Authentication, Payment Intents, Checkout, JavaScript SDK, Webhooks, Webhook Verification, Test Mode, Production, Security, API Reference, Error Codes, Troubleshooting, and Changelog.
+The public developer documentation lives at https://jafari.co.in/docs and covers: Quickstart, Authentication, Payment Intents, Checkout, Payment Links, Receipts, Reconciliation, JavaScript SDK, Webhooks, Webhook Verification, Test Mode, Supported Networks, Production, Security, API Reference, Error Codes, Troubleshooting, and Changelog.
 
 The supported integration paths are the **hosted checkout page**, the **REST API**
 (see above), and the **JavaScript SDK**. The SDK ships as a standalone IIFE build
@@ -82,18 +88,30 @@ See the public roadmap for current, planned, exploring, and future product direc
 
 JafariPay is non-custodial. Merchants do **not** deposit funds into a JafariPay-controlled wallet. Each Payment Intent embeds the merchant's configured `settlement_address`, and the customer's wallet sends the USDC ERC-20 transfer **directly** to that address. The backend only observes and verifies the on-chain transfer — it never holds, forwards, or has spending authority over merchant funds, and it never requests or stores private keys or seed phrases.
 
-## Arc integration
+## Network integration
 
-Network configuration is seeded into the database at startup (`server/db/schema.ts`) and mirrored in the frontend on-chain facts (`src/onchain-facts.ts`):
+The backend network registry is the single source of truth, seeded at startup (`server/db/networks.ts` → `server/db/schema.ts`) and mirrored in the frontend allowlist (`src/supported-chains.ts`, `src/onchain-facts.ts`).
 
-| Network | Chain ID | USDC (native predeploy) | Decimals |
-|---|---|---|---|
-| Arc Testnet | `5042002` | `0x3600000000000000000000000000000000000000` | 6 |
-| Arc Mainnet | `5042` | `0x3600000000000000000000000000000000000000` | 6 |
+**Supported production mainnets** (native USDC, 6 decimals):
 
-- Wallet transport uses viem's `arcTestnet` / `arc` chains via wagmi (`src/config.ts`).
-- The backend verifier (`server/blockchain/arc-provider.ts`) builds an Arc RPC client per network and decodes the ERC-20 `Transfer` event from the configured USDC contract.
-- Live/Mainnet payments are disabled unless `ENABLE_LIVE_PAYMENTS=true`; the default is Arc Testnet only.
+| Network | Chain ID | Native USDC |
+|---|---|---|
+| Arc | `5042` | `0x3600000000000000000000000000000000000000` |
+| Base | `8453` | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| Arbitrum One | `42161` | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` |
+| Polygon PoS | `137` | `0x3c499c542cef5e3811e1192ce70d8cc03d5c3359` |
+| Avalanche C | `43114` | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` |
+| OP Mainnet | `10` | `0x0b2c639c533813f4aa9d7837caf62653d097ff85` |
+| Linea | `59144` | `0x176211869ca2b568f2a7d4ee941e073a821ee1ff` |
+| Unichain | `130` | `0x078d782b760474a361dda0af3839290b0ef57ad6` |
+| ZKsync Era | `324` | `0x1d17CBcF0D6D143135aE902365D2E5e2A16538D4` |
+| Celo | `42220` | `0xcebA9300f2b948710d2653dD7B07f33A8B32118C` |
+
+**Development testnets (NOT for production):** Arc Testnet (`5042002`), Base Sepolia (`84532`), Arbitrum Sepolia (`421614`).
+
+- Money is accepted only from each network's pinned native USDC contract; bridged/synthetic USDC variants are rejected by address.
+- Wallet transport uses viem's curated chain definitions via wagmi (`src/supported-chains.ts`, `src/config.ts`); the backend verifier (`server/blockchain/arc-provider.ts`) decodes the ERC-20 `Transfer` event from the configured USDC contract per network.
+- Live/mainnet payments are disabled unless `ENABLE_LIVE_PAYMENTS=true`; the default is testnet only.
 
 ## Developer integration
 
@@ -175,7 +193,7 @@ Environment variables (names only — never commit real values):
 | `CHECKOUT_BASE_URL` | Public base URL used to build `checkout_url`. |
 | `JAFARIPAY_DOMAIN` | Domain shown in the SIWE sign-in message. |
 | `DATABASE_URL` | SQLite file path (defaults to `./data/jafaripay.db`). |
-| `ENABLE_LIVE_PAYMENTS` | Leave unset for Testnet-only; `true` enables Arc Mainnet/live. |
+| `ENABLE_LIVE_PAYMENTS` | Leave unset for testnet-only; `true` enables live-class (mainnet) payments across all supported networks. |
 
 See `docs/DEPLOYMENT.md` for full VPS/Nginx/HTTPS deployment instructions.
 
@@ -215,7 +233,7 @@ contracts/                 Solidity + Foundry scaffolding
 docs/                      DEPLOYMENT.md, UAT-REPORT.md
 ```
 
-## Reusable primitives for Arc builders
+## Reusable primitives for builders
 
 Components in this repo that another Arc builder can study or reuse:
 
@@ -230,7 +248,7 @@ Components in this repo that another Arc builder can study or reuse:
 
 ## Why JafariPay / what it adds
 
-Compared with a basic "send USDC on Arc" example, JafariPay adds the developer-facing payment-infrastructure layer around the transfer: Payment Intents with idempotency, a hosted checkout, backend-authoritative on-chain verification (so success never depends on the browser), duplicate/replay protection, signed webhooks with retries, a reconciliation worker, wallet-based merchant auth with tenant isolation, and a merchant dashboard — while remaining non-custodial. It is intended as a practical, forkable reference for building USDC acceptance on Arc.
+Compared with a basic "send USDC on Arc" example, JafariPay adds the developer-facing payment-infrastructure layer around the transfer: Payment Intents with idempotency, a hosted checkout, Payment Links, receipts, and reconciliation, backend-authoritative on-chain verification (so success never depends on the browser), duplicate/replay protection, signed webhooks with retries, wallet-based merchant auth with tenant isolation, and a merchant dashboard — across 10 supported EVM mainnets, while remaining non-custodial. It is intended as a practical, forkable reference for building multi-chain USDC acceptance.
 
 ## Mainnet proof
 

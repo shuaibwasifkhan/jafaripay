@@ -3,6 +3,7 @@ import {
   Zap, ShieldCheck, Code2, Wallet, ArrowRight, ArrowUpRight, ExternalLink, CheckCircle,
   Building2, Store, Package, ShoppingBag, Heart, Check, Key, Webhook, CircleCheck, Boxes,
   BookOpen, Map, Shield, Github, Mail,
+  Globe2, Link2, Receipt, ArrowLeftRight, CreditCard,
 } from 'lucide-react';
 import { HeroShowcase } from './HeroShowcase';
 
@@ -38,43 +39,55 @@ window.location.href = intent.checkout_url;
 // 3. Confirm on your server with the signed payment.succeeded webhook.`;
 
 const CAPABILITIES = [
-  { icon: Zap, label: 'USDC Native', desc: 'Settle in USDC on Arc' },
+  { icon: Zap, label: 'USDC Native', desc: 'Native USDC on each network' },
+  { icon: Globe2, label: 'Multi-Chain', desc: 'One integration, 10 chains' },
   { icon: ShieldCheck, label: 'Non-Custodial', desc: 'Funds go straight to your wallet' },
   { icon: CircleCheck, label: 'On-Chain Verified', desc: 'Every transfer verified on-chain' },
-  { icon: Boxes, label: 'Arc', desc: 'Sub-second finality' },
   { icon: Webhook, label: 'Signed Webhooks', desc: 'HMAC-signed, auto-retried' },
 ];
 
 const FEATURES = [
   {
+    eyebrow: 'Network',
+    icon: Globe2, tile: 'bg-teal-50', iconCls: 'text-teal-600',
+    title: 'Multi-chain USDC',
+    desc: 'Accept native USDC across 10 supported EVM mainnets — Arc, Base, Arbitrum and more — with one integration.'
+  },
+  {
+    eyebrow: 'Checkout',
+    icon: CreditCard, tile: 'bg-forest-50', iconCls: 'text-forest-600',
+    title: 'Hosted checkout',
+    desc: 'One checkout URL — wallet connect, network switch, and USDC transfer handled for you.'
+  },
+  {
+    eyebrow: 'Payments',
+    icon: Boxes, tile: 'bg-lilac-50', iconCls: 'text-lilac-600',
+    title: 'Payment intents',
+    desc: 'Server-side intents pin amount, currency, network, and settlement address — immutable and idempotent.'
+  },
+  {
+    eyebrow: 'Links',
+    icon: Link2, tile: 'bg-lilac-50', iconCls: 'text-lilac-600',
+    title: 'Payment links',
+    desc: 'Create a shareable USDC payment link from the dashboard — no customer-side integration required.'
+  },
+  {
+    eyebrow: 'Receipts',
+    icon: Receipt, tile: 'bg-forest-50', iconCls: 'text-forest-600',
+    title: 'Receipts',
+    desc: 'Automatic on-chain receipts, emailed to customers and viewable via a public capability link.'
+  },
+  {
+    eyebrow: 'Reconciliation',
+    icon: ArrowLeftRight, tile: 'bg-teal-50', iconCls: 'text-teal-600',
+    title: 'Payment reconciliation',
+    desc: 'Every intent matched to its settled on-chain transfer in one auditable ledger, with automatic expiry and recovery.'
+  },
+  {
     eyebrow: 'Fund custody',
     icon: ShieldCheck, tile: 'bg-forest-50', iconCls: 'text-forest-600',
-    title: 'Non-custodial',
+    title: 'Non-custodial settlement',
     desc: 'USDC transfers directly from customer to your settlement wallet. JafariPay never holds your funds.'
-  },
-  {
-    eyebrow: 'Network',
-    icon: Zap, tile: 'bg-teal-50', iconCls: 'text-teal-600',
-    title: 'Arc native',
-    desc: 'Built on Arc where USDC is the native gas token. Sub-second finality, predictable fees.'
-  },
-  {
-    eyebrow: 'Authentication',
-    icon: Wallet, tile: 'bg-lilac-50', iconCls: 'text-lilac-600',
-    title: 'Wallet auth',
-    desc: 'Merchant sign-in via EIP-4361 SIWE. No email or password. Your wallet is your identity.'
-  },
-  {
-    eyebrow: 'Developer',
-    icon: Code2, tile: 'bg-lilac-50', iconCls: 'text-lilac-600',
-    title: 'Developer first',
-    desc: 'REST API, JavaScript SDK, hosted checkout, signed webhooks, and idempotent requests.'
-  },
-  {
-    eyebrow: 'Security',
-    icon: CheckCircle, tile: 'bg-forest-50', iconCls: 'text-forest-600',
-    title: 'Verified on-chain',
-    desc: 'Backend independently verifies every ERC-20 Transfer event. Wrong amount or recipient fails.'
   },
   {
     eyebrow: 'Reliability',
@@ -82,13 +95,19 @@ const FEATURES = [
     title: 'Signed webhooks',
     desc: 'HMAC-SHA256 signed events, automatic retries, and replay protection for payment.succeeded.'
   },
+  {
+    eyebrow: 'Developer',
+    icon: Code2, tile: 'bg-lilac-50', iconCls: 'text-lilac-600',
+    title: 'Developer first',
+    desc: 'A clean REST API, a JavaScript SDK, and wallet-based merchant sign-in. No email, no password.'
+  },
 ];
 
 const STEPS = [
-  { step: '01', title: 'Create Payment Intent', desc: 'Your backend calls the API to create a payment intent with amount and order details.' },
-  { step: '02', title: 'Customer pays', desc: 'Customer opens hosted checkout, connects wallet, switches to Arc, and sends USDC.' },
-  { step: '03', title: 'Verified on-chain', desc: 'Backend detects the ERC-20 Transfer event and verifies recipient, amount, and token contract.' },
-  { step: '04', title: 'Webhook fired', desc: 'payment.succeeded webhook is signed and delivered to your endpoint. Mark order paid.' },
+  { step: '01', title: 'Create Payment Intent', desc: 'Your backend calls the API to pin the amount, currency, network, and settlement wallet. Idempotent by design.' },
+  { step: '02', title: 'Customer pays', desc: 'Customer opens hosted checkout, connects their wallet, and sends USDC on the selected network.' },
+  { step: '03', title: 'Verified on-chain', desc: 'JafariPay detects the ERC-20 Transfer event and verifies recipient, amount, and the pinned native USDC contract.' },
+  { step: '04', title: 'Webhook & reconciliation', desc: 'A signed payment.succeeded webhook fires, the payment is reconciled to its on-chain transfer, and a receipt can be issued.' },
 ];
 
 const USE_CASES = [
@@ -112,6 +131,30 @@ const USE_CASES = [
     icon: Heart, title: 'Donations',
     desc: 'Receive transparent, direct USDC gifts from supporters worldwide — non-custodial from the first click.'
   },
+];
+
+// Public, production-supported networks — the certified EVM mainnets only.
+// Development/test networks are intentionally excluded from this list (see Docs
+// → Supported Networks for the separate, clearly-labelled testnet set).
+const MAINNETS = [
+  { name: 'Arc', mono: 'AR', chainId: 5042 },
+  { name: 'Base', mono: 'BA', chainId: 8453 },
+  { name: 'Arbitrum', mono: 'AR', chainId: 42161 },
+  { name: 'Polygon PoS', mono: 'PO', chainId: 137 },
+  { name: 'Avalanche C', mono: 'AV', chainId: 43114 },
+  { name: 'Optimism', mono: 'OP', chainId: 10 },
+  { name: 'Linea', mono: 'LI', chainId: 59144 },
+  { name: 'Unichain', mono: 'UN', chainId: 130 },
+  { name: 'zkSync Era', mono: 'ZK', chainId: 324 },
+  { name: 'Celo', mono: 'CE', chainId: 42220 },
+];
+
+const NETWORK_TILES = [
+  'bg-forest-50 text-forest-700',
+  'bg-teal-50 text-teal-700',
+  'bg-lilac-50 text-lilac-700',
+  'bg-gold-50 text-gold-700',
+  'bg-sand-100 text-slate-600',
 ];
 
 export default function LandingPage() {
@@ -147,11 +190,11 @@ export default function LandingPage() {
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-ink mb-6 leading-[1.05]" style={{ letterSpacing: '-0.03em', fontFamily: "'Space Grotesk', sans-serif" }}>
               USDC payment infrastructure
-              <span className="block text-transparent bg-clip-text bg-gradient-to-r from-forest-500 via-teal-500 to-lilac-400">in minutes.</span>
+              <span className="block text-transparent bg-clip-text bg-gradient-to-r from-forest-500 via-teal-500 to-lilac-400">built for every supported chain.</span>
             </h1>
             <p className="text-lg sm:text-xl text-slate-600 mb-8 text-pretty leading-relaxed max-w-xl">
-              Add fast, programmable USDC checkout to your site or app with a few lines of code.
-              Non-custodial — USDC goes directly to your wallet, verified on-chain.
+              Accept USDC across 10 supported EVM mainnets with hosted checkout, a REST API, and an SDK.
+              Payments are verified on-chain and settle directly to your wallet — non-custodial, from customer to merchant.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 sm:gap-4">
@@ -188,6 +231,39 @@ export default function LandingPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Multi-chain networks */}
+      <section className="max-w-6xl mx-auto px-6 pb-24">
+        <div className="text-center mb-12">
+          <p className="text-xs font-semibold text-forest-600 uppercase tracking-wider mb-3">Networks</p>
+          <h2 className="text-3xl font-bold text-ink mb-3" style={{ letterSpacing: '-0.02em', fontFamily: "'Space Grotesk', sans-serif" }}>
+            One integration. Multiple USDC networks.
+          </h2>
+          <p className="text-slate-600 max-w-2xl mx-auto leading-relaxed">
+            Create a Payment Intent on any supported network — the same hosted checkout, on-chain
+            verification, signed webhooks, and direct settlement apply everywhere. Payments settle in
+            native USDC on the network they were made on.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {MAINNETS.map(({ name, mono, chainId }, i) => (
+            <div key={name} className="rounded-2xl bg-white border border-sand-200 shadow-soft p-4 flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${NETWORK_TILES[i % NETWORK_TILES.length]}`}>
+                <span className="text-xs font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{mono}</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink truncate">{name}</p>
+                <p className="text-[11px] text-slate-500 font-mono">chain {chainId}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-center text-xs text-slate-500 mt-6">
+          10 supported EVM mainnets. Money is accepted only from each network's pinned native USDC
+          contract — bridged and synthetic USDC variants are never accepted.
+        </p>
       </section>
 
       {/* Product showcase */}
@@ -245,7 +321,7 @@ export default function LandingPage() {
               </div>
               <div className="flex items-center justify-center py-2 rounded-lg bg-forest-700 text-white text-xs font-semibold">Pay 1.00 USDC</div>
             </div>
-            <p className="text-xs text-slate-500 mt-3 leading-relaxed">Hosted checkout on Arc — customer connects their wallet and sends USDC. No forms, no card data.</p>
+            <p className="text-xs text-slate-500 mt-3 leading-relaxed">Hosted checkout on any supported network — customer connects their wallet and sends USDC. No forms, no card data.</p>
           </div>
 
           {/* 3 · USDC transfer */}
@@ -262,7 +338,7 @@ export default function LandingPage() {
                 </div>
                 <div className="flex flex-col items-center px-4">
                   <ArrowRight size={13} className="text-forest-600" />
-                  <p className="text-[10px] text-slate-400 mt-1">USDC · Arc</p>
+                  <p className="text-[10px] text-slate-400 mt-1">USDC · on-chain</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] text-slate-400 mb-0.5">TO</p>

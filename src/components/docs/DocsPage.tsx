@@ -39,6 +39,7 @@ const NAV = [
   { slug: 'webhooks', label: 'Webhooks', icon: Webhook },
   { slug: 'webhook-verification', label: 'Webhook Verification', icon: ShieldCheck },
   { slug: 'test-mode', label: 'Test Mode', icon: TestTube },
+  { slug: 'networks', label: 'Supported Networks', icon: Globe },
   { slug: 'production', label: 'Production', icon: Globe },
   { slug: 'security', label: 'Security', icon: Shield },
   { slug: 'api', label: 'API Reference', icon: FileText },
@@ -210,7 +211,7 @@ https://your-instance.com/checkout/{paymentIntentId}
 The checkout page:
 - Displays amount, merchant name, order ID, and network
 - Handles wallet connection (MetaMask, WalletConnect, etc.)
-- Automatically switches the wallet to Arc
+- Automatically switches the wallet to the intent's configured network
 - Sends the USDC ERC-20 transfer to the settlement wallet
 - Polls the backend for verification status
 - Shows the transaction explorer link on success
@@ -356,6 +357,51 @@ GET /v1/payment-intents/:id   intent status + link to its payment
 
 Because each \`tx_hash\` can be credited to at most one intent (a database uniqueness constraint), the intent -> payment -> on-chain-transfer chain is one-to-one and fully auditable for accounting.`
   },
+  networks: {
+    title: 'Supported Networks',
+    body: `## Supported Networks
+
+JafariPay accepts **native USDC** on **10 supported EVM mainnets**. One payment model — Payment Intents, hosted checkout, on-chain verification, signed webhooks, and direct merchant settlement — works the same way on every network. A payment is verified and settled **on the network it was made on**; JafariPay does not move funds between chains.
+
+| Network | Chain ID | Native USDC (6 decimals) | Explorer |
+|---|---|---|---|
+| Arc | \`5042\` | \`0x3600000000000000000000000000000000000000\` | https://explorer.arc.io |
+| Base | \`8453\` | \`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\` | https://basescan.org |
+| Arbitrum One | \`42161\` | \`0xaf88d065e77c8cC2239327C5EDb3A432268e5831\` | https://arbiscan.io |
+| Polygon PoS | \`137\` | \`0x3c499c542cef5e3811e1192ce70d8cc03d5c3359\` | https://polygonscan.com |
+| Avalanche C-Chain | \`43114\` | \`0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E\` | https://snowtrace.io |
+| OP Mainnet | \`10\` | \`0x0b2c639c533813f4aa9d7837caf62653d097ff85\` | https://optimistic.etherscan.io |
+| Linea | \`59144\` | \`0x176211869ca2b568f2a7d4ee941e073a821ee1ff\` | https://lineascan.build |
+| Unichain | \`130\` | \`0x078d782b760474a361dda0af3839290b0ef57ad6\` | https://uniscan.xyz |
+| ZKsync Era | \`324\` | \`0x1d17CBcF0D6D143135aE902365D2E5e2A16538D4\` | https://explorer.zksync.io |
+| Celo | \`42220\` | \`0xcebA9300f2b948710d2653dD7B07f33A8B32118C\` | https://celoscan.io |
+
+Money is accepted **only** from the pinned native USDC contract per network. Bridged, synthetic, or wrapped USDC (USDC.e, USDbC, Wormhole/LayerZero USDC, and similar) are never accepted — the contract address is authoritative, never the token symbol, name, or decimals.
+
+### How a network is chosen
+
+The network is fixed per Payment Intent. \`allowed_networks\` on intent creation constrains the set; each network must be enabled and match the key's test/live class. Once created, the intent's \`network\` and \`chain_id\` can never change. The customer selects one supported network at checkout and the transfer is verified on that same network.
+
+### Multi-chain, not cross-chain
+
+This is multi-chain acceptance, not automatic cross-chain settlement. Paying USDC on Base settles to your settlement wallet on Base; paying on Arbitrum settles on Arbitrum. JafariPay never bridges or routes a payment from one chain to another.
+
+### Ethereum is not a payable network
+
+Ethereum mainnet is used only for ENS resolution and is **not** offered as a payment network.
+
+## Development / Testnets — NOT FOR PRODUCTION
+
+The networks below exist for **testing only**. They are **not** production-supported payment networks and are never presented as live. Use test-prefixed keys (\`pk_test_\` / \`sk_test_\`) against them.
+
+| Test network | Chain ID | USDC | Explorer |
+|---|---|---|---|
+| Arc Testnet | \`5042002\` | \`0x3600000000000000000000000000000000000000\` | https://explorer.testnet.arc.io |
+| Base Sepolia | \`84532\` | \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\` | https://sepolia.basescan.org |
+| Arbitrum Sepolia | \`421614\` | \`0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d\` | https://sepolia.arbiscan.io |
+
+Test and live data are completely isolated: a live key cannot operate on a testnet and a test key cannot operate on a mainnet.`,
+  },
   sdk: {
     title: 'JavaScript SDK',
     body: `## JavaScript SDK
@@ -444,17 +490,27 @@ Webhooks deliver signed event notifications to your server.
   "type": "payment.succeeded",
   "created": 1735000000,
   "data": {
-    "id": "pay_...",
     "payment_intent_id": "pi_...",
-    "amount": "25.00",
-    "currency": "USDC",
-    "order_id": "ORDER-123",
-    "tx_hash": "0x...",
-    "block_number": 12345,
-    "network": "arc_testnet"
+    "payment": {
+      "id": "pay_...",
+      "payment_intent_id": "pi_...",
+      "merchant_id": "merch_...",
+      "tx_hash": "0x...",
+      "network": "base_mainnet",
+      "chain_id": 8453,
+      "sender_address": "0x...",
+      "recipient_address": "0x...",
+      "amount_base_units": "25000000",
+      "amount_decimal": "25.000000",
+      "block_number": 12345,
+      "block_timestamp": 1735000000,
+      "status": "succeeded"
+    }
   }
 }
 \`\`\`
+
+Correlate the event to your own order using \`event.data.payment_intent_id\` — the webhook does **not** carry your \`order_id\` (that lives on the Payment Intent; read it back with \`GET /v1/payment-intents/:id\`). Amounts are provided both as \`amount_base_units\` (USDC smallest units, 6 decimals) and \`amount_decimal\`. The \`payment.processing\` and \`payment.expired\` events carry a minimal \`data\` of just \`{ payment_intent_id }\`; \`payment.failed\` adds \`data.reason\`.
 
 ### Delivery
 
@@ -530,10 +586,10 @@ A copy-paste, dependency-free implementation ships in the repo at
     title: 'Test Mode',
     body: `## Test Mode
 
-Test mode uses Arc Testnet (Chain ID: 5042002).
+Test mode uses real transactions on the development test networks — **Arc Testnet** (Chain ID: \`5042002\`, the default), **Base Sepolia** (\`84532\`), and **Arbitrum Sepolia** (\`421614\`). These are for testing only and are **not** production-supported payment networks (see Supported Networks).
 
 - Use \`pk_test_\` and \`sk_test_\` API keys
-- Payments use real Arc Testnet transactions (not simulated)
+- Payments use real testnet transactions (not simulated)
 - USDC at \`0x3600000000000000000000000000000000000000\` on Arc Testnet
 - Get free test USDC from https://faucet.circle.com
 
@@ -545,17 +601,17 @@ Test and live data are completely isolated. You cannot accidentally mix test pay
 2. Get test USDC from the faucet
 3. Create a Payment Intent with a test sk_ key
 4. Open the checkout URL
-5. Connect your wallet, switch to Arc Testnet, pay
+5. Connect your wallet, switch to the selected test network, pay
 6. Watch the dashboard — the payment should appear as succeeded within 10-30 seconds
 7. Check your webhook delivery log
 
-This is a real blockchain transaction. You can verify it on https://explorer.testnet.arc.io`,
+This is a real blockchain transaction. On Arc Testnet you can verify it on https://explorer.testnet.arc.io`,
   },
   production: {
     title: 'Production',
     body: `## Production / Live Mode
 
-Live mode uses Arc Mainnet (Chain ID: 5042).
+Live mode charges real USDC on the supported production EVM mainnets (see Supported Networks). **Arc Mainnet** (chain \`5042\`) is the default flagship network; **Base, Arbitrum One, Polygon PoS, Avalanche C, OP Mainnet, Linea, Unichain, ZKsync Era, and Celo** are also supported — the same integration works on each.
 
 - Set \`ENABLE_LIVE_PAYMENTS=true\` in your server environment
 - Use \`pk_live_\` and \`sk_live_\` API keys
@@ -749,7 +805,7 @@ const NAV_GROUPS: Array<{ label: string; items: string[] }> = [
   { label: 'Getting Started', items: ['quickstart', 'auth', 'test-mode'] },
   { label: 'Payments', items: ['payment-intents', 'checkout', 'payment-links', 'sdk', 'receipts', 'reconciliation'] },
   { label: 'Integrations', items: ['webhooks', 'webhook-verification', 'api', 'error-codes'] },
-  { label: 'Operations', items: ['production', 'security', 'troubleshooting', 'changelog'] },
+  { label: 'Operations', items: ['networks', 'production', 'security', 'troubleshooting', 'changelog'] },
 ];
 
 const SUBTITLES: Record<string, string> = {
@@ -763,8 +819,9 @@ const SUBTITLES: Record<string, string> = {
   sdk: 'Embeddable checkout SDK — load /sdk.js and call JafariPay.checkout() or JafariPay.mount().',
   webhooks: 'Signed event notifications delivered to your server.',
   'webhook-verification': 'HMAC-SHA256 signature verification for every webhook delivery.',
-  'test-mode': 'Develop against Arc Testnet with real USDC transactions.',
-  production: 'Go live on Arc Mainnet with a verified, secure setup.',
+  'test-mode': 'Develop against test networks (Arc Testnet, Base Sepolia, Arbitrum Sepolia) with real USDC transactions.',
+  networks: 'The 10 supported production EVM mainnets — plus the clearly-separated development/test networks.',
+  production: 'Go live on supported mainnets with a verified, secure setup.',
   security: 'How JafariPay keeps payments, keys, and data safe.',
   api: 'REST API for Payment Intents, payments, projects, and more.',
   'error-codes': 'Every status code the API can return — and how to fix it.',

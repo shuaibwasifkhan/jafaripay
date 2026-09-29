@@ -2,7 +2,6 @@ import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
   Bot,
   CheckCircle,
-  ChevronRight,
   Coins,
   Copy,
   Globe,
@@ -211,28 +210,27 @@ function RecurringBody() {
 
 /* ---------- slide 5 · Multi-chain USDC ---------- */
 
+const MULTICHAIN_NETWORKS = ['Arc', 'Base', 'Arbitrum', 'Polygon', 'Optimism', 'Celo'];
+
 function MultiChainBody() {
   return (
     <>
       <SlideHeader
         icon={<Globe size={14} className="text-white" />}
-        title="USDC Payment"
-        badge={<span className="text-[10px] font-semibold text-slate-500 tabular-nums">100.00 USDC</span>}
+        title="One integration"
+        badge={<span className="text-[10px] font-semibold text-slate-500">10 networks</span>}
       />
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <div className="flex-1 p-2.5 rounded-lg bg-white border border-sand-200 min-w-0">
-          <p className="text-[10px] text-slate-400">Source</p>
-          <p className="text-xs font-semibold text-ink">Ethereum</p>
-        </div>
-        <ChevronRight size={13} className="text-forest-600 flex-shrink-0" aria-hidden="true" />
-        <div className="flex-1 p-2.5 rounded-lg bg-teal-50 border border-teal-200 min-w-0">
-          <p className="text-[10px] text-teal-600">Settle</p>
-          <p className="text-xs font-semibold text-ink">Arc</p>
-        </div>
+      <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+        {MULTICHAIN_NETWORKS.map((n) => (
+          <div key={n} className="flex items-center gap-1.5 p-2 rounded-lg bg-white border border-sand-200 min-w-0">
+            <CheckCircle size={11} className="text-forest-600 flex-shrink-0" aria-hidden="true" />
+            <p className="text-xs font-semibold text-ink truncate">{n}</p>
+          </div>
+        ))}
       </div>
       <div className="flex items-center gap-2 p-2.5 rounded-lg bg-forest-50 border border-forest-200">
         <CheckCircle size={12} className="text-forest-600 flex-shrink-0" />
-        <p className="text-[11px] font-medium text-forest-800">Settlement completed</p>
+        <p className="text-[11px] font-medium text-forest-800">Verified &amp; settled on each network</p>
       </div>
     </>
   );
@@ -312,19 +310,19 @@ const SLIDES: Slide[] = [
     id: 'checkout',
     title: 'Live Checkout',
     status: 'Live',
-    url: 'checkout.jafari.co.in/pay/pi_9f4k2',
+    url: 'jafari.co.in/checkout/pi_9f4k2',
     body: <CheckoutBody />,
     supporting: 'Non-custodial. USDC goes directly to the merchant.',
-    floating: { title: 'Payment verified', sub: 'USDC · Arc · On-chain confirmed' },
+    floating: { title: 'Payment verified', sub: 'Native USDC · on-chain confirmed' },
   },
   {
     id: 'payment-links',
     title: 'Payment Links',
-    status: 'Coming',
-    url: 'jafari.co.in/pay/lnk_8s2v',
+    status: 'Live',
+    url: 'jafari.co.in/pay/plnk_8s2v',
     body: <PaymentLinkBody />,
-    supporting: 'Create a simple payment link for customers.',
-    floating: { title: 'Ready to share', sub: 'Payment link · planned' },
+    supporting: 'Create a shareable payment link for customers.',
+    floating: { title: 'Ready to share', sub: 'Payment link · live' },
   },
   {
     id: 'invoices',
@@ -347,11 +345,11 @@ const SLIDES: Slide[] = [
   {
     id: 'multi-chain',
     title: 'Multi-chain USDC',
-    status: 'Exploring',
-    url: 'jafari.co.in/settlement/usdc',
+    status: 'Live',
+    url: 'jafari.co.in/networks',
     body: <MultiChainBody />,
-    supporting: 'Accept supported-chain USDC and settle to Arc.',
-    floating: { title: 'Cross-chain', sub: 'Ethereum → Arc · exploring' },
+    supporting: 'One integration — accept USDC across 10 supported EVM mainnets.',
+    floating: { title: 'Multi-chain', sub: '10 supported networks · live' },
   },
   {
     id: 'agent-payments',
