@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CopyButton } from '../shared/CopyButton';
 import {
+  ArrowLeftRight,
   ArrowRight,
   BookOpen,
   Calendar,
@@ -12,8 +13,10 @@ import {
   Globe,
   Info,
   KeyRound,
+  Link2,
   Mail,
   Menu,
+  Receipt,
   Search,
   Shield,
   ShieldCheck,
@@ -29,6 +32,9 @@ const NAV = [
   { slug: 'auth', label: 'Authentication', icon: KeyRound },
   { slug: 'payment-intents', label: 'Payment Intents', icon: CreditCard },
   { slug: 'checkout', label: 'Checkout', icon: BookOpen },
+  { slug: 'payment-links', label: 'Payment Links', icon: Link2 },
+  { slug: 'receipts', label: 'Receipts', icon: Receipt },
+  { slug: 'reconciliation', label: 'Reconciliation', icon: ArrowLeftRight },
   { slug: 'sdk', label: 'JavaScript SDK', icon: Code2 },
   { slug: 'webhooks', label: 'Webhooks', icon: Webhook },
   { slug: 'webhook-verification', label: 'Webhook Verification', icon: ShieldCheck },
@@ -98,14 +104,17 @@ JafariPay.checkout({ paymentIntent: pi_id });
 
 \`\`\`javascript
 app.post('/webhooks/jafaripay', (req, res) => {
-  const sig = req.headers['jafaripay-signature'];
+  // Express lower-cases header names; JafariPay sends \`X-JafariPay-Signature\`
+  const sig = req.headers['x-jafaripay-signature'];
+  // Verify against the RAW body bytes, BEFORE parsing (see Webhook Verification)
   if (!verifySignature(req.rawBody, sig, WEBHOOK_SECRET)) {
     return res.sendStatus(400);
   }
-  const event = req.body;
+  const event = JSON.parse(req.rawBody);
   if (event.type === 'payment.succeeded') {
-    const { order_id } = event.data;
-    await markOrderPaid(order_id);
+    // data = { payment_intent_id, payment }; correlate to your order server-side
+    const { payment_intent_id } = event.data;
+    await markOrderPaid(payment_intent_id);
   }
   res.sendStatus(200);
 });
@@ -231,6 +240,122 @@ res.redirect(payment.checkout_url);
 
 Do not use the frontend redirect as your payment confirmation. Listen for the \`payment.succeeded\` webhook.`,
   },
+  'payment-links': {
+    title: 'Payment Links',
+    body: `## Payment Links
+
+A Payment Link is a shareable, hosted URL that collects a fixed USDC amount — no code required from your customer. You create the link with your secret key, send the \`pay_url\` to anyone, and they pay from their wallet on the hosted page.
+
+> **One charge per link (MVP):** a Payment Link can be paid exactly once. After it settles, opening it again returns \`409 link_paid\` instead of minting a second payment — create a fresh link per order.
+
+### Create a link (secret key)
+
+\`\`\`bash
+curl -X POST https://your-instance.com/v1/payment-links \\
+  -H "Authorization: Bearer sk_test_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "amount": "49.00",
+    "currency": "USDC",
+    "description": "Pro plan - month 1",
+    "order_id": "INV-2026-001",
+    "expires_at": 1790000000
+  }'
+\`\`\`
+
+Returns \`201\` with the stored link plus a ready-to-share \`pay_url\`:
+
+\`\`\`json
+{
+  "id": "plnk_...",
+  "amount_decimal": "49.00",
+  "currency": "USDC",
+  "status": "active",
+  "pay_url": "https://your-instance.com/pay/plnk_..."
+}
+\`\`\`
+
+Fields: \`amount\` (required, USDC decimal string), \`currency\` (must be \`"USDC"\`), \`description\`, \`order_id\`, \`metadata\`, \`allowed_networks\` (optional network slugs — each must be enabled and match the key's test/live class), and \`expires_at\` (optional future unix seconds).
+
+### Manage links
+
+\`\`\`
+GET  /v1/payment-links              list (isolated to your account)
+GET  /v1/payment-links/:id          detail
+POST /v1/payment-links/:id/disable  stop accepting payment (secret key)
+\`\`\`
+
+### The public pay page
+
+Unauthenticated and capability-gated by the unguessable link id — these return only non-sensitive display fields:
+
+\`\`\`
+GET  /pay/:id          link summary: amount, merchant_name, status, expired, paid, payable
+POST /pay/:id/create   mint a Payment Intent from the link and return checkout_url
+\`\`\`
+
+\`POST /pay/:id/create\` takes the amount **from the stored link** — nothing about the money comes from the request body. It returns \`410 link_disabled\`, \`410 link_expired\`, or \`409 link_paid\` (with the original \`payment_intent_id\`) as guardrails, and \`503 setup.no_settlement_wallet\` if no active settlement wallet is configured for the resolved network. The customer then completes the standard hosted-checkout flow at the returned \`checkout_url\`.`
+  },
+  receipts: {
+    title: 'Receipts',
+    body: `## Receipts
+
+When a payment is verified on-chain and reaches \`succeeded\`, JafariPay generates a **receipt** (one per payment, \`rcpt_...\`) and — if a customer email is on file — delivers an HTML receipt by email.
+
+### Giving the customer a receipt
+
+Ask for an email at pay time: the hosted checkout can send \`receipt_email\` with the verification request, or you can set it when creating the intent. After success the customer can open the public receipt page at \`/receipt/{receiptId}\`.
+
+### Public receipt (customer view)
+
+\`\`\`
+GET /api/receipts/:id
+\`\`\`
+
+Authorized purely by the unguessable \`rcpt_\` capability id (non-enumerable). Returns a safe projection — \`merchant_name\`, \`amount\`, \`currency\`, \`network\`, \`chain_id\`, \`tx_hash\`, \`explorer_url\`, \`order_id\`, \`status\`, \`customer_email\`, \`email_status\` — never any secret or internal hash fields.
+
+### Merchant receipt APIs
+
+\`\`\`
+GET  /v1/receipts              list, isolated to your merchant_id (order_id filter, limit/offset)
+POST /v1/receipts/:id/resend   re-attempt the receipt email (secret key)
+\`\`\`
+
+\`/resend\` returns \`{ already_sent: true }\` if the email already went out, or \`{ email_status: 'no_email' }\` if no address is on file; otherwise it resets the backoff and retries immediately.
+
+### Delivery semantics
+
+- **Email failure never touches the money.** A failed send only updates \`receipts.email_status\`; the payment stays \`succeeded\`.
+- Sending retries with backoff up to 4 attempts.
+- Receipt HTML escapes merchant-controlled fields, so a hostile \`merchant_name\` cannot inject script into a customer's email.
+- **Email requires an outbound provider to be configured** (the built-in transport is \`dev\`/\`none\` by default; point it at your own sender before receipts reach real inboxes).
+
+To attach or repair an email on an already-succeeded payment, \`POST /checkout/{paymentIntentId}/receipt\` re-issues the receipt to the given address (capability-gated by the intent id; never alters settlement).`
+  },
+  reconciliation: {
+    title: 'Reconciliation',
+    body: `## Reconciliation
+
+Reconciliation keeps intent status honest. It is an **automatic background worker**, not an API you call. Every 30 seconds it:
+
+1. **Expires** Payment Intents whose \`expires_at\` has passed *and* whose settlement grace buffer has elapsed — so a valid on-chain transfer that lands a few seconds late is still credited. Expired intents emit a \`payment.expired\` webhook.
+2. **Self-heals** intents stuck in \`processing\` for more than 5 minutes with no matching payment, returning them to \`requires_payment\` so they can still be paid.
+3. **Processes** pending webhook deliveries and pending receipt emails, each with its own retry/backoff.
+
+> The worker performs **no blockchain scanning**. On-chain verification happens only through the explicit verify path; reconciliation simply moves database state to match reality.
+
+### The ledger view
+
+Every status change is written to an append-only \`payment_events\` timeline (\`payment.created\`, \`payment.expired\`, ...), and each settled payment links its intent to exactly one on-chain transaction. Read it back through:
+
+\`\`\`
+GET /v1/payments              verified payments for your account
+GET /v1/payments/:id          payment detail: tx_hash, network, amount, block
+GET /v1/payment-intents/:id   intent status + link to its payment
+\`\`\`
+
+Because each \`tx_hash\` can be credited to at most one intent (a database uniqueness constraint), the intent -> payment -> on-chain-transfer chain is one-to-one and fully auditable for accounting.`
+  },
   sdk: {
     title: 'JavaScript SDK',
     body: `## JavaScript SDK
@@ -333,21 +458,30 @@ Webhooks deliver signed event notifications to your server.
 
 ### Delivery
 
-- Webhooks are retried with exponential backoff: 30s, 1m, 5m, 30m, 2h, 12h
-- Maximum 6 retry attempts
+- Webhooks are retried with exponential backoff: ~10s, 30s, 2m, 5m, 30m, 2h, 8h
+- Up to 8 total attempts (1 initial + 7 retries)
 - A 2xx response marks delivery as succeeded
-- Use the dashboard to view delivery history and manually retry`,
+- Use the dashboard to view delivery history and manually retry
+
+### Signing secret
+
+- The signing secret is shown ONCE when you create or rotate an endpoint. Copy
+  it immediately; JafariPay stores only an encrypted copy for signing and can
+  never display the plaintext again.
+- Rotate a secret from the dashboard if it is leaked or lost. Rotation invalidates
+  the old secret immediately; deliveries signed with the old secret will no longer
+  verify, so update your server before sending traffic.`,
   },
   'webhook-verification': {
     title: 'Webhook Verification',
     body: `## Verifying Webhook Signatures
 
-Every webhook includes a \`JafariPay-Signature\` header.
+Every webhook includes an \`X-JafariPay-Signature\` header.
 
 ### Signature format
 
 \`\`\`
-JafariPay-Signature: t=1735000000,v1=a1b2c3...
+X-JafariPay-Signature: t=1735000000,v1=a1b2c3...
 \`\`\`
 
 - \`t\` — Unix timestamp of the delivery
@@ -358,33 +492,39 @@ JafariPay-Signature: t=1735000000,v1=a1b2c3...
 \`\`\`javascript
 import crypto from 'crypto';
 
-function verifyWebhookSignature(rawBody, signature, secret) {
-  const parts = signature.split(',');
-  const timestamp = parts.find(p => p.startsWith('t=')).slice(2);
-  const sig = parts.find(p => p.startsWith('v1=')).slice(3);
+function verifyWebhookSignature(rawBody, signature, secret, maxAgeSec = 300) {
+  const parts = Object.fromEntries(signature.split(',').map(p => p.split('=')));
+  const timestamp = parseInt(parts.t, 10);
+  const sig = parts.v1;
+  if (!timestamp || !sig) return false;
 
-  // Replay attack protection — reject events older than 5 minutes
-  const age = Math.abs(Date.now() / 1000 - parseInt(timestamp, 10));
-  if (age > 300) throw new Error('Timestamp too old');
+  // Replay protection — reject deliveries outside the freshness window
+  if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > maxAgeSec) return false;
 
+  // Sign the SAME raw bytes the server signed: <t> + "." + rawBody
   const payload = timestamp + '.' + rawBody;
   const expected = crypto
     .createHmac('sha256', secret)
     .update(payload)
     .digest('hex');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(sig, 'hex'),
-    Buffer.from(expected, 'hex')
-  );
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length) return false; // timingSafeEqual throws on length mismatch
+  return crypto.timingSafeEqual(a, b);
 }
 \`\`\`
 
-**Always use the raw request body** (before JSON parsing) for signature verification.
+**Always use the raw request body** (the exact bytes received, before JSON parsing
+or re-serialization) — re-\`JSON.stringify\` can change key order or whitespace and
+will break the signature.
 
-**Always use \`crypto.timingSafeEqual\`** to prevent timing attacks.
+**Always use \`crypto.timingSafeEqual\`** (after a length check) to prevent timing attacks.
 
-**Reject events older than 5 minutes** to prevent replay attacks.`,
+**Reject events outside the freshness window** (default ±5 minutes) to limit replay.
+
+A copy-paste, dependency-free implementation ships in the repo at
+\`scripts/verify-webhook-reference.mjs\` (run \`node scripts/verify-webhook-reference.mjs --selftest\`).`,
   },
   'test-mode': {
     title: 'Test Mode',
@@ -607,7 +747,7 @@ const SUPPORT_EMAIL = 'dev@jafari.co.in';
 
 const NAV_GROUPS: Array<{ label: string; items: string[] }> = [
   { label: 'Getting Started', items: ['quickstart', 'auth', 'test-mode'] },
-  { label: 'Payments', items: ['payment-intents', 'checkout', 'sdk'] },
+  { label: 'Payments', items: ['payment-intents', 'checkout', 'payment-links', 'sdk', 'receipts', 'reconciliation'] },
   { label: 'Integrations', items: ['webhooks', 'webhook-verification', 'api', 'error-codes'] },
   { label: 'Operations', items: ['production', 'security', 'troubleshooting', 'changelog'] },
 ];
@@ -617,6 +757,9 @@ const SUBTITLES: Record<string, string> = {
   auth: 'Sign-In With Ethereum (SIWE / EIP-4361) — no email or password, your wallet address is your identity.',
   'payment-intents': 'A Payment Intent represents a customer’s intent to pay a specific amount.',
   checkout: 'A hosted checkout page for every Payment Intent — connect, pay, verify.',
+  'payment-links': 'Shareable, hosted USDC payment links — no customer-side integration required.',
+  receipts: 'Automatic on-chain receipts, emailed to customers and viewable via a public link.',
+  reconciliation: 'Automatic intent reconciliation and the auditable payment ledger.',
   sdk: 'Embeddable checkout SDK — load /sdk.js and call JafariPay.checkout() or JafariPay.mount().',
   webhooks: 'Signed event notifications delivered to your server.',
   'webhook-verification': 'HMAC-SHA256 signature verification for every webhook delivery.',

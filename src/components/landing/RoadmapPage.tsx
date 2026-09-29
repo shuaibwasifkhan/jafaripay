@@ -42,7 +42,7 @@ const PHASES: Phase[] = [
     badge: 'Live now',
     status: 'Live',
     title: 'Shipping today',
-    sub: 'Production-ready on Arc Mainnet — build on it now.',
+    sub: 'The core USDC payment rail on Arc — built, on-chain verified, and ready to integrate.',
     cols: 'lg:grid-cols-4',
     accent: {
       badge: 'text-forest-700 bg-forest-50 border-forest-200',
