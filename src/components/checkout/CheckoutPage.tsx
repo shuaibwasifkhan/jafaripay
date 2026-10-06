@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import { USDC_DECIMALS } from '@/onchain-facts';
 import { resolveCheckoutNetwork, isWrongNetwork } from '@/checkout-network';
 import { buildCctpCheckoutPlan, tokenMessengerV2Abi, type CctpSourceRoute } from '@/cctp-checkout';
+import { describeCheckoutAmounts, type CheckoutFeesView } from '@/checkout-fees';
 import { Amount } from '@/onchain-money';
 import { formatAddress, formatUSDC } from '../../lib/format';
 
@@ -20,6 +21,11 @@ interface PaymentIntent {
   // cross-chain intent; the client never derives the burn params itself.
   cross_chain?: boolean;
   cctp_source_route?: CctpSourceRoute;
+  // PHASE 1 — server-authored fee disclosure. `forwarding` and `fees` come
+  // straight from GET /checkout/:id; the UI only renders them (it never
+  // recomputes a fee or lets a client value reach a money label).
+  forwarding?: boolean;
+  fees?: CheckoutFeesView | null;
 }
 
 type CheckoutStep = 'loading' | 'ready' | 'wallet-sign' | 'confirming' | 'verifying' | 'submitted' | 'succeeded' | 'failed' | 'expired' | 'cancelled';
@@ -169,6 +175,13 @@ export default function CheckoutPage() {
   // funds mint on Arc). Every same-chain effect/branch below is disabled for it
   // so the ERC-20 auto-verify path can never run against a source burn.
   const isCrossChainIntent = intent?.cross_chain === true;
+
+  // PHASE 1 — honest amounts for FORWARDING payments (non-null only when the
+  // server marked this intent cctp_forwarding_additive): the wallet will
+  // approve/burn the GROSS M + F, so the header and the Pay button must show
+  // the same number the plan builder puts on-chain (plan.approve.amount).
+  // Same-chain and DIRECT (F = 0) intents get null — their UX is unchanged.
+  const feeLines = describeCheckoutAmounts(intent);
 
   // Backend verification loop
   const verifyingRef = useRef(false);
@@ -357,8 +370,24 @@ export default function CheckoutPage() {
               <>
                 <p className="text-xs text-slate-500 mb-1">{intent.merchant_name || 'Merchant'}</p>
                 <p className="text-3xl font-bold text-ink tabular-nums" style={{ letterSpacing: '-0.02em', fontFamily: "'Space Grotesk', sans-serif" }}>
-                  {formatUSDC(intent.amount)} USDC
+                  {feeLines ? feeLines.total : formatUSDC(intent.amount)} USDC
                 </p>
+                {feeLines && (
+                  <div className="mt-2 rounded-xl bg-sand-100 border border-sand-200 px-3 py-2 text-xs space-y-1">
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span>Merchant receives on Arc</span>
+                      <span className="tabular-nums">{feeLines.merchantAmount} USDC</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span>Circle forwarding fee</span>
+                      <span className="tabular-nums">+ {feeLines.forwardingFee} USDC</span>
+                    </div>
+                    <div className="flex items-center justify-between font-semibold text-ink border-t border-sand-200 pt-1">
+                      <span>Total you pay</span>
+                      <span className="tabular-nums">{feeLines.total} USDC</span>
+                    </div>
+                  </div>
+                )}
                 {intent.description && <p className="text-sm text-slate-600 mt-1">{intent.description}</p>}
                 {intent.order_id && <p className="text-xs text-slate-500 mt-0.5">Order: {intent.order_id}</p>}
                 <div className="flex items-center gap-1.5 mt-3">
@@ -609,7 +638,7 @@ export default function CheckoutPage() {
                     >
                       {step === 'wallet-sign' || isWalletPending
                         ? <><Loader2 className="animate-spin" size={14} /> Waiting for wallet…</>
-                        : `Pay ${formatUSDC(intent.amount)} USDC`}
+                        : `Pay ${feeLines ? feeLines.total : formatUSDC(intent.amount)} USDC`}
                     </button>
                   </div>
                 )}

@@ -196,7 +196,50 @@ This prevents race conditions where a customer pays the original amount but your
 | \`succeeded\` | Payment verified on-chain |
 | \`failed\` | Verification failed |
 | \`expired\` | Payment window closed without payment |
-| \`cancelled\` | Cancelled by the merchant |`,
+| \`cancelled\` | Cancelled by the merchant |
+
+### Cross-chain settlement to Arc (opt-in)
+
+By default every intent is same-chain. Pass \`cross_chain: true\` together with a supported **source** \`network\` to have the payment routed to the merchant's pinned **Arc** wallet over Circle CCTP v2 with Forwarding. The merchant amount never changes: the customer burns the requested amount **M** plus a server-quoted Circle **forwarding fee F** on the source chain, and your Arc wallet is minted **exactly M** (full economics under *Supported Networks → Cross-chain settlement to Arc*).
+
+\`\`\`http
+POST /v1/payment-intents
+Authorization: Bearer sk_test_...
+Idempotency-Key: your-unique-key
+Content-Type: application/json
+
+{
+  "amount": "25.00",
+  "currency": "USDC",
+  "network": "base",
+  "cross_chain": true,
+  "order_id": "ORDER-123"
+}
+\`\`\`
+
+A cross-chain create response adds:
+
+| Field | Meaning |
+|-------|---------|
+| \`cross_chain: true\` | this intent settles via Circle CCTP |
+| \`source_network\` / \`source_chain_id\` | the chain the customer pays on (Base, Arbitrum One, Polygon PoS, Avalanche C-Chain, OP Mainnet, Linea, Unichain — matching your key's test/live class) |
+| \`settlement_network\` / \`settlement_chain_id\` | the Arc destination the funds land on |
+| \`fees\` | the server-authored cost breakdown: merchant amount \`merchant_amount_base_units\` (= M), Circle forwarding fee \`forwarding_fee_base_units\` (= F), and the gross the customer pays \`gross_amount_base_units\` (= M + F). When no live quote is available the intent stays on the Standard direct route with no forwarding fee (the amount burned equals the amount minted) |
+
+Creation fails closed with \`cross_chain.unsupported_source\` when the network has no verified CCTP route to Arc (the response lists \`supported_sources\`; the network still works same-chain), \`cross_chain.source_is_destination\` for Arc itself (just pay same-chain), or \`cross_chain.destination_unavailable\`.
+
+### Verifying a cross-chain payment
+
+A cross-chain intent is **never** credited through the same-chain verify path — \`POST /v1/payment-intents/:id/verify\` returns \`400 cross_chain.wrong_verify_endpoint\` for it by design. There is no separate merchant verify call: once the customer submits the source burn at checkout, JafariPay's background worker drives the journey end-to-end —
+
+1. the source \`depositForBurnWithHook\` transaction (amount M + F, \`maxFee = F\`) is detected and validated against the server-approved invariants;
+2. the source finality threshold is reached;
+3. the Circle attestation for the burn is fetched (the \`payment.cross_chain.attestation_received\` webhook fires);
+4. Circle's forward transaction is observed — JafariPay never signs or submits the destination claim;
+5. the destination mint on Arc is confirmed on-chain for **exactly M**;
+6. the intent moves to \`succeeded\`, the payment is recorded in the ledger, and the \`payment.succeeded\` webhook fires.
+
+Read progress at any time via \`GET /v1/payment-intents/:id\` (or the unauthenticated \`GET /v1/payment-intents/:id/public\`): once a transfer row exists the response carries a \`cross_chain\` journey view — \`state\`, a coarse \`status\`, a five-stop \`milestones\` timeline (\`source_submitted → source_finalized → attestation → arc_settlement → completed\`), source and destination tx hashes, \`mint_recipient\`, amounts, and the \`fees\` breakdown. As always, treat webhooks — not the browser — as the source of truth.`,
   },
   checkout: {
     title: 'Hosted Checkout',
@@ -212,7 +255,8 @@ The checkout page:
 - Displays amount, merchant name, order ID, and network
 - Handles wallet connection (MetaMask, WalletConnect, etc.)
 - Automatically switches the wallet to the intent's configured network
-- Sends the USDC ERC-20 transfer to the settlement wallet
+- **Same-chain intent** — sends the USDC ERC-20 transfer to the settlement wallet
+- **Cross-chain intent** — discloses the forwarding breakdown (merchant receives M, Circle fee F, total M + F) and pays through the Circle CCTP Forwarding route (approve + burn of M + F)
 - Polls the backend for verification status
 - Shows the transaction explorer link on success
 
@@ -239,7 +283,15 @@ const payment = await res.json();
 res.redirect(payment.checkout_url);
 \`\`\`
 
-Do not use the frontend redirect as your payment confirmation. Listen for the \`payment.succeeded\` webhook.`,
+Do not use the frontend redirect as your payment confirmation. Listen for the \`payment.succeeded\` webhook.
+
+### Cross-chain checkout (Circle CCTP Forwarding)
+
+For an intent created with \`cross_chain: true\`, the hosted checkout shows the customer exactly what they will pay before touching the wallet — merchant amount **M**, server-quoted Circle **forwarding fee F**, and the **M + F** total. Every number comes from the server-authored breakdown; the page never computes a fee itself, and same-chain checkouts are unchanged (single amount, no fee row).
+
+The customer's wallet then approves and burns **M + F** in one CCTP source transaction (\`depositForBurnWithHook\` with \`maxFee = F\`, Standard finality). Circle forwards the transfer and mints **exactly M** to the merchant's pinned Arc wallet — JafariPay is never in the money path and never signs the destination claim.
+
+After the burn is submitted, the checkout tracks the journey (source confirmation → finality → Circle attestation → Arc mint → settled). The payment becomes \`succeeded\` only once the Arc-side mint is confirmed on-chain; the same-chain verify path never runs for a cross-chain intent. Webhooks (\`payment.cross_chain.attestation_received\`, \`payment.cross_chain.failed\`, \`payment.succeeded\`) remain your integration's source of truth.`,
   },
   'payment-links': {
     title: 'Payment Links',
@@ -329,7 +381,7 @@ POST /v1/receipts/:id/resend   re-attempt the receipt email (secret key)
 - **Email failure never touches the money.** A failed send only updates \`receipts.email_status\`; the payment stays \`succeeded\`.
 - Sending retries with backoff up to 4 attempts.
 - Receipt HTML escapes merchant-controlled fields, so a hostile \`merchant_name\` cannot inject script into a customer's email.
-- **Email requires an outbound provider to be configured** (the built-in transport is \`dev\`/\`none\` by default; point it at your own sender before receipts reach real inboxes).
+- **Email requires an outbound provider to be configured** (\`EMAIL_TRANSPORT\` selects it: \`dev\` in-memory sink by default, \`none\` for explicit no-op, or \`brevo_smtp\` for the supported production relay with its credentials set; until a real sender is configured, no mail leaves the server).
 
 To attach or repair an email on an already-succeeded payment, \`POST /checkout/{paymentIntentId}/receipt\` re-issues the receipt to the given address (capability-gated by the intent id; never alters settlement).`
   },
@@ -389,7 +441,7 @@ Each Payment Intent is settled on the network it was created for, directly to yo
 
 ### Cross-chain settlement to Arc (Circle CCTP, opt-in)
 
-JafariPay additionally supports **cross-chain settlement to Arc** using Circle **CCTP v2**. A customer pays native USDC on any CCTP-supported source chain and the amount is delivered, **1:1**, to the merchant's **one pinned Arc wallet** on Arc Mainnet — no manual bridging, and the merchant does **not** need a settlement wallet on each source chain.
+JafariPay additionally supports **cross-chain settlement to Arc** using Circle **CCTP v2 with Forwarding**. A customer pays native USDC on any CCTP-supported source chain: they burn the merchant amount **M** plus the server-quoted Circle **forwarding fee F** on the source, and the merchant receives **exactly M** in the merchant's **one pinned Arc wallet** on Arc Mainnet — no manual bridging, and the merchant does **not** need a settlement wallet on each source chain.
 
 | Cross-chain source (pay here) | Settles to |
 |---|---|
@@ -399,7 +451,7 @@ Key properties:
 
 - **Opt-in per intent.** Created with \`cross_chain: true\` plus a supported \`network\` (the source). All existing same-chain intents are unchanged.
 - **Non-custodial.** The CCTP mint recipient on Arc is always your pinned Arc wallet. JafariPay never holds private keys, never signs on your behalf, and is never the recipient of customer funds.
-- **Standard transfer, 1:1.** \`maxFee = 0\`, so the amount burned on the source equals the amount minted to your Arc wallet — no fee is deducted from the principal.
+- **Forwarding economics.** The Circle forwarding fee F is quoted and persisted **by the server** before payment: the customer's source approval/burn is **M + F** with \`maxFee = F\`, Circle takes F from that burn, and your Arc wallet is minted **exactly M** — the fee never touches the principal and JafariPay adds no platform fee. When no live quote is available the intent stays on the Standard direct route with **no forwarding fee** (the amount burned equals the amount minted).
 - **Full lifecycle tracking.** The intent exposes a status timeline (source burn → source finality → Circle attestation → Arc mint → settled) and emits the \`payment.cross_chain.attestation_received\` and \`payment.cross_chain.failed\` webhooks. A cross-chain intent is credited **only** after the Arc-side mint is confirmed on-chain — never through the same-chain verify path.
 
 > **Not cross-chain:** **ZKsync Era** and **Celo** are supported for **same-chain USDC only**. They have no verified Circle CCTP route to Arc, so JafariPay never advertises or attempts a cross-chain settlement for them.
@@ -660,7 +712,7 @@ USDC is transferred directly from the customer to your settlement wallet address
 
 ### Secret key handling
 
-- Secret keys (\`sk_\`) are hashed (bcrypt) in the database — plaintext is never stored
+- Secret keys (\`sk_\`) are stored in the database only as **HMAC-SHA256** digests (keyed with a server-side secret) — plaintext is never stored
 - Keys are shown only once at creation
 - Revoke keys immediately if compromised
 - Never use \`sk_\` keys in frontend/browser code
@@ -703,62 +755,56 @@ Authentication: \`Authorization: Bearer sk_test_...\` or \`Authorization: Bearer
 ### Payment Intents
 
 \`\`\`
-POST /v1/payment-intents
-GET  /v1/payment-intents/:id
-POST /v1/payment-intents/:id/cancel
-POST /v1/payment-intents/:id/verify
+POST /v1/payment-intents              create an intent (secret key)
+GET  /v1/payment-intents              list intents (API key)
+GET  /v1/payment-intents/:id          intent status + its payment (API key)
+POST /v1/payment-intents/:id/cancel   stop accepting payment (secret key)
+POST /v1/payment-intents/:id/verify   trigger backend verification (API key)
+GET  /v1/payment-intents/:id/public   minimal status read (no auth)
 \`\`\`
 
 ### Payments
 
 \`\`\`
-GET /v1/payments
-GET /v1/payments/:id
+GET /v1/payments              verified payments for your account
+GET /v1/payments/:id          payment detail: tx_hash, network, amount, block
 \`\`\`
 
-### Projects
+### Payment Links
 
 \`\`\`
-GET  /v1/projects
-POST /v1/projects
-GET  /v1/projects/:id
+POST /v1/payment-links              create a link (secret key)
+GET  /v1/payment-links              list links
+GET  /v1/payment-links/:id          link detail
+POST /v1/payment-links/:id/disable  stop accepting payments (secret key)
+GET  /api/pay/:id                   public checkout JSON for a link
 \`\`\`
 
-### API Keys
+### Receipts
 
 \`\`\`
-GET    /v1/api-keys
-POST   /v1/api-keys
-DELETE /v1/api-keys/:id
+GET  /v1/receipts              list receipts for your account
+GET  /v1/receipts/:id          public receipt read (no auth — customer page)
+POST /v1/receipts/:id/resend   re-attempt the receipt email (API key)
 \`\`\`
 
-### Webhook Endpoints
+### Hosted Checkout JSON
 
 \`\`\`
-GET    /v1/webhook-endpoints
-POST   /v1/webhook-endpoints
-PATCH  /v1/webhook-endpoints/:id
-DELETE /v1/webhook-endpoints/:id
-\`\`\`
-
-### Webhook Deliveries
-
-\`\`\`
-GET  /v1/webhook-deliveries
-POST /v1/webhook-deliveries/:id/retry
-\`\`\`
-
-### Settlement Wallets
-
-\`\`\`
-GET    /v1/settlement-wallets
-POST   /v1/settlement-wallets
-DELETE /v1/settlement-wallets/:id
+GET  /api/checkout/:id              intent data for the hosted checkout page
+POST /api/checkout/:id/verify       submit a tx hash for verification
+POST /api/checkout/:id/receipt      request the customer receipt email
 \`\`\`
 
 ---
 
-See OpenAPI spec at \`/docs/openapi.json\`.`,
+### Dashboard-only management (not a public API)
+
+Project, API-key, settlement-wallet, and webhook-endpoint/delivery management is available **only through the merchant dashboard**, behind a signed-in browser session (SIWE login) on session-authenticated \`/api/*\` routes (\`/api/projects\`, \`/api/api-keys\`, \`/api/settlement-wallets\`, \`/api/webhook-endpoints\`, \`/api/webhook-deliveries\`). These are **not exposed as API-key endpoints under \`/v1\`** and can change without notice — do not build integrations against them. There is currently **no public API to create or manage webhook endpoints or API keys**; configure them in the dashboard.
+
+---
+
+There is no OpenAPI specification file published today; this reference and the guide pages are the authoritative description of the API.`,
   },
   troubleshooting: {
     title: 'Troubleshooting',
@@ -850,6 +896,20 @@ const SUBTITLES: Record<string, string> = {
 };
 
 const CHANGELOG_ENTRIES: Array<{ date: string; items: Array<{ tag: 'New' | 'Fixed' | 'Improved' | 'Docs'; text: string }> }> = [
+  {
+    date: '2026-10-06',
+    items: [
+      { tag: 'New', text: 'Cross-chain settlement to Arc via Circle CCTP v2 with Forwarding — opt-in cross_chain:true: the customer burns the merchant amount plus a server-quoted Circle forwarding fee on the source chain and the merchant is minted exactly the requested amount on Arc. Implemented and verified end-to-end on testnet; production availability is pending Circle mainnet forwarding entitlement and deployment' },
+      { tag: 'Improved', text: 'Hosted checkout now discloses the forwarding breakdown before payment — merchant amount, Circle forwarding fee, and the total the customer approves/burns — all read from the server-authored quote (same-chain checkouts are unchanged)' },
+      { tag: 'Fixed', text: 'The Payment Intent create response now reports the fee breakdown that matches the forwarding quote the server actually applied, instead of a hardcoded zero' },
+      { tag: 'Improved', text: 'Dashboard payments now show a cross-chain journey timeline: source burn, finality, Circle attestation, destination mint tx (forwardTxHash), and the failure reason when a route fails' },
+      { tag: 'New', text: 'Catch-up entries for capabilities that shipped without changelog entries: native USDC acceptance across 10 supported EVM mainnets (same-chain settlement), Payment Links, emailed + public receipts, the JavaScript SDK served at /sdk.js, and per-intent live forwarding-fee quoting with a safe Standard-direct fallback' },
+      { tag: 'Improved', text: 'Webhook engine hardening: endpoint secrets encrypted at rest (AES-256-GCM), replay and SSRF guards, the 8-attempt retry ladder, and two additional subscribable cross-chain lifecycle events (payment.cross_chain.attestation_received / payment.cross_chain.failed)' },
+      { tag: 'New', text: 'Brevo SMTP transport for receipt email (implemented and send-verified; production mail delivery remains pending environment wiring)' },
+      { tag: 'Improved', text: 'Fail-closed production config boot guard: with NODE_ENV=production the server refuses to start unless secrets, origins, email transport, and RPC-proxy settings are complete and coherent' },
+      { tag: 'Docs', text: 'Public docs and README corrected to the real forwarding economics (replacing the outdated flat-amount / no-fee wording), the API Reference now lists only endpoints that actually exist (key/wallet/webhook management is dashboard-only), key storage is documented as HMAC-SHA256, and the webhook documentation enumerates all seven deliverable events' },
+    ],
+  },
   {
     date: '2026-09-26',
     items: [{ tag: 'Improved', text: 'Redesigned the frontend with a premium light fintech UI' }],
@@ -1558,7 +1618,7 @@ function DocsFooter() {
               <span className="font-display text-[15px] font-bold tracking-tight text-ink">JafariPay</span>
             </div>
             <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-ink/50">
-              Non-custodial USDC payments on Arc — accept stablecoins and settle directly to your own wallet.
+              Non-custodial USDC payments across 10 supported EVM mainnets — settle directly to your own wallet on the network you are paid on, with optional cross-chain consolidation to Arc.
             </p>
           </div>
           <div>
@@ -1593,7 +1653,7 @@ function DocsFooter() {
         <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-sand-100 pt-6 text-xs text-ink/40">
           <span>© 2026 JafariPay. All rights reserved.</span>
           <span className="flex items-center gap-1.5">
-            <Globe size={12} /> Built on Arc
+            <Globe size={12} /> Multi-chain USDC · settled on native rails
           </span>
         </div>
       </div>

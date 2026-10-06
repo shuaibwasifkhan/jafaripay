@@ -8,15 +8,30 @@
  * makes the ALREADY-TRUE economics legible to the merchant API, the checkout and
  * the dashboard, so no party has to reverse-engineer the contract.
  *
- * THE MODEL (verified, not invented — see db/cctp.ts cctpSourceRoutePlan):
- *   JafariPay mandates the Circle CCTP **Standard transfer**: maxFee = 0. Fast
- *   Transfer is deliberately avoided because its bps fee is deducted from the
- *   minted principal and would break the merchant exact-amount guarantee. So for
- *   every supported route:
- *     gross burned on the source chain == net minted to the merchant on Arc (1:1).
- *   JafariPay levies no per-transaction protocol fee on the transfer amount in
- *   this model, so `platform_fee` is 0 and reported as such (an additive field a
- *   future fee tier can populate — never a silent deduction the client can't see).
+ * TWO VERIFIED FEE REGIMES (PRODUCT PHASE 1 — money-facing correctness):
+ *
+ * 1. DIRECT Standard transfer (no Forwarding quote, fee F = 0): maxFee = 0, so
+ *    the amount burned on the source equals the amount minted on Arc (1:1).
+ *    `describeCrossChainFees` describes this regime (and the legacy deductive
+ *    Fast-Transfer view where an observed fee comes out of the principal).
+ * 2. CIRCLE FORWARDING (server-approved quote F > 0, STEP 5/5N): the fee is
+ *    ADDITIVE on the source — the customer approves/burns the GROSS M + F with
+ *    maxFee = F, Circle takes F from the burn, and the merchant's pinned Arc
+ *    wallet is minted EXACTLY M. Never describe this route as "1:1" or
+ *    "maxFee = 0": the customer pays M + F, the merchant receives M.
+ *    `describeForwardingFees` is the ONLY faithful description of it.
+ *
+ * Neither function charges anything, moves money, or decides any amount — the
+ * intent's stored `amount_base_units` (merchant amount M) and the persisted
+ * server-approved/persisted fee F remain authoritative; this module only makes
+ * the ALREADY-TRUE economics legible to the merchant API, the checkout, the
+ * dashboard and the docs, so no party has to reverse-engineer the contract and
+ * no client can present a fee the server never authored.
+ *
+ * JafariPay levies no per-transaction protocol fee on the transfer amount in
+ * either regime, so `platform_fee` is 0 and reported as such (an additive field
+ * a future fee tier can populate — never a silent deduction the client can't
+ * see).
  *
  * SAFETY: net is derived by BigInt subtraction and clamped at zero; a malformed
  * or negative stored string degrades to a safe 0-fee, gross==net view rather
@@ -26,7 +41,7 @@
 
 import { formatBaseUnitsToDecimal } from './money.js';
 
-export type CrossChainFeeModel = 'cctp_standard_1to1';
+export type CrossChainFeeModel = 'cctp_standard_1to1' | 'cctp_forwarding_additive';
 
 export interface CrossChainFeeBreakdown {
   /** Which fee regime this transfer is under (single value today). */
@@ -47,6 +62,12 @@ export interface CrossChainFeeBreakdown {
   net_amount_decimal: string;
   /** True when the merchant receives the full customer amount (Standard, no fee). */
   is_one_to_one: boolean;
+  /** FORWARDING ONLY: the server-approved Circle fee F, charged ADDITIVELY. */
+  forwarding_fee_base_units?: string;
+  forwarding_fee_decimal?: string;
+  /** FORWARDING ONLY: the merchant amount M (== net; the fee never touches it). */
+  merchant_amount_base_units?: string;
+  merchant_amount_decimal?: string;
 }
 
 /** Parse a stored base-units string defensively to a non-negative BigInt. */
@@ -92,5 +113,48 @@ export function describeCrossChainFees(opts: {
     net_amount_base_units: net.toString(),
     net_amount_decimal: formatBaseUnitsToDecimal(net),
     is_one_to_one: net === gross,
+  };
+}
+
+/**
+ * FORWARDING (server-approved fee F > 0): the faithful, ADDITIVE description.
+ * `merchantAmountBaseUnits` is the intent's stored M — ALWAYS what the merchant
+ * nets on Arc. `forwardingFeeBaseUnits` is the server-persisted Circle fee F,
+ * which the CUSTOMER pays on top: source approval/burn == M + F. This is a
+ * pure projection of already-stored server values; it never recomputes, quotes
+ * or accepts a client-supplied fee.
+ *
+ * `is_one_to_one` is false by construction: the customer's gross burn and the
+ * merchant's credit genuinely differ (M + F vs M). A DIRECT Standard transfer
+ * (F = 0) must keep using `describeCrossChainFees` instead.
+ */
+export function describeForwardingFees(opts: {
+  merchantAmountBaseUnits: string;
+  forwardingFeeBaseUnits: string;
+  platformFeeBaseUnits?: string | null;
+}): CrossChainFeeBreakdown {
+  const merchant = safeBaseUnits(opts.merchantAmountBaseUnits);
+  const fee = safeBaseUnits(opts.forwardingFeeBaseUnits);
+  const platformFee = safeBaseUnits(opts.platformFeeBaseUnits);
+  const gross = merchant + fee + platformFee; // what the customer approves/burns on the source
+
+  return {
+    model: 'cctp_forwarding_additive',
+    currency: 'USDC',
+    gross_amount_base_units: gross.toString(),
+    gross_amount_decimal: formatBaseUnitsToDecimal(gross),
+    platform_fee_base_units: platformFee.toString(),
+    platform_fee_decimal: formatBaseUnitsToDecimal(platformFee),
+    // The burn carries maxFee = F and Circle takes F from the gross burn, so
+    // the minted principal is untouched: the merchant nets exactly M.
+    cctp_max_fee_base_units: fee.toString(),
+    cctp_fee_executed_base_units: fee.toString(),
+    net_amount_base_units: merchant.toString(),
+    net_amount_decimal: formatBaseUnitsToDecimal(merchant),
+    is_one_to_one: false,
+    forwarding_fee_base_units: fee.toString(),
+    forwarding_fee_decimal: formatBaseUnitsToDecimal(fee),
+    merchant_amount_base_units: merchant.toString(),
+    merchant_amount_decimal: formatBaseUnitsToDecimal(merchant),
   };
 }

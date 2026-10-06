@@ -9,7 +9,7 @@ import { Router, type Request, type Response } from 'express';
 import { getDb } from '../db/schema.js';
 import { cctpSourceRoutePlan } from '../db/cctp.js';
 import { CCTP_FORWARD_HOOK_DATA, FORWARDING_FINALITY_STANDARD } from '../blockchain/cctp-forwarding-fee.js';
-import { describeCrossChainFees } from '../lib/fees.js';
+import { describeCrossChainFees, describeForwardingFees } from '../lib/fees.js';
 import { generateId } from '../lib/ids.js';
 import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
 import { detectSourceBurn } from '../blockchain/cctp-source.js';
@@ -92,12 +92,16 @@ router.get('/:id', (req: Request, res: Response) => {
     }
     pi.forwarding = fee > 0n;
     pi.cctp_source_route = plan;
-    // PHASE 14: expose the fee model so the customer sees, before paying, that a
-    // Standard CCTP transfer is 1:1 — the merchant receives exactly this amount
-    // and JafariPay levies no hidden deduction on the transfer principal.
-    // For a Forwarding route the Circle fee F is passed through so the display
-    // reflects that Circle (not JafariPay) deducts it and the merchant still nets M.
-    pi.fees = describeCrossChainFees({ amountBaseUnits: String(pi.amount_base_units), feeBaseUnits: fee > 0n ? feeRaw : '0' });
+    // PHASE 1 — MONEY-FACING CORRECTNESS: the checkout MUST show the true
+    // economics before the customer signs. F > 0 is a FORWARDING route: the fee
+    // is ADDITIVE — the customer approves/burns the gross M + F and the
+    // merchant's pinned Arc wallet nets exactly M (never "1:1", never
+    // maxFee=0). F = 0 keeps the DIRECT Standard 1:1 description, byte-identical
+    // to the pre-forwarding surface. Either way these fields are pure server
+    // projections — the UI consumes them and never recomputes a fee.
+    pi.fees = fee > 0n
+      ? describeForwardingFees({ merchantAmountBaseUnits: String(pi.amount_base_units), forwardingFeeBaseUnits: feeRaw })
+      : describeCrossChainFees({ amountBaseUnits: String(pi.amount_base_units), feeBaseUnits: '0' });
   } else {
     pi.cross_chain = false;
   }

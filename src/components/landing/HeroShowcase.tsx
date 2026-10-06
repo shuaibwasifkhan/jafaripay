@@ -322,7 +322,7 @@ const SLIDES: Slide[] = [
     url: 'jafari.co.in/pay/plnk_8s2v',
     body: <PaymentLinkBody />,
     supporting: 'Create a shareable payment link for customers.',
-    floating: { title: 'Ready to share', sub: 'Payment link · live' },
+    floating: { title: 'Ready to share', sub: 'Payment link · sample' },
   },
   {
     id: 'invoices',

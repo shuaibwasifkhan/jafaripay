@@ -17,7 +17,7 @@ import {
   ARC_MAINNET_SLUG, ARC_TESTNET_SLUG,
 } from '../db/cctp.js';
 import { loadCrossChainStatus } from '../blockchain/cctp-status.js';
-import { describeCrossChainFees } from '../lib/fees.js';
+import { describeCrossChainFees, describeForwardingFees } from '../lib/fees.js';
 import { applyForwardingQuote, ForwardingFeeError, type ApplyForwardingQuote } from '../blockchain/cctp-forwarding-fee.js';
 import type { FetchLike } from '../blockchain/cctp-attestation.js';
 
@@ -232,6 +232,20 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
     } catch { /* fail-safe: stay DIRECT (forwarding_max_fee_base_units remains 0) */ }
   }
 
+  // PHASE 1 — MONEY-FACING CORRECTNESS (C5): the create-response fee breakdown
+  // must reflect the fee the quote ACTUALLY persisted, not a hardcoded zero.
+  // Read the server-authored value straight back off the row — a client can
+  // still never influence it (ownership proven in cctp-intents.test.ts).
+  let responseFeeBaseUnits = '0';
+  if (isCrossChain) {
+    const feeRow = db.prepare('SELECT forwarding_max_fee_base_units FROM payment_intents WHERE id = ?').get(id) as { forwarding_max_fee_base_units: string | null } | undefined;
+    const raw = feeRow?.forwarding_max_fee_base_units ?? '0';
+    try {
+      const v = BigInt(raw);
+      responseFeeBaseUnits = v > 0n ? v.toString() : '0';
+    } catch { responseFeeBaseUnits = '0'; }
+  }
+
   const responseBody = {
     id, status: 'requires_payment', amount: amountDecimal, amount_base_units: amountBaseUnits.toString(),
     currency, network, chain_id: netConfig.chain_id, usdc_address: netConfig.usdc_address,
@@ -240,9 +254,15 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
     expires_at: expiresAt, created_at: Math.floor(Date.now() / 1000),
     cross_chain: isCrossChain,
     ...(isCrossChain ? { source_network: sourceNetwork, source_chain_id: sourceChainId, settlement_network: settlementNetwork, settlement_chain_id: settlementChainId, cctp_destination_domain: destinationDomain } : {}),
-    // PHASE 14 (additive): the merchant sees the exact fee/net breakdown at the
-    // moment of creation — Standard CCTP is 1:1, so net_amount equals the amount.
-    ...(isCrossChain ? { fees: describeCrossChainFees({ amountBaseUnits: amountBaseUnits.toString(), feeBaseUnits: '0' }) } : {}),
+    // PHASE 1 (additive): the merchant sees the exact fee/net breakdown at the
+    // moment of creation, reflecting the fee the quote ACTUALLY persisted. A
+    // FORWARDING intent (server-approved F > 0) is ADDITIVE: the customer pays
+    // M + F, the merchant nets exactly M. A DIRECT intent keeps the Standard
+    // 1:1 description (F = 0, net == amount) — byte-identical to the
+    // pre-forwarding surface, so nothing existing breaks.
+    ...(isCrossChain ? { fees: responseFeeBaseUnits !== '0'
+      ? describeForwardingFees({ merchantAmountBaseUnits: amountBaseUnits.toString(), forwardingFeeBaseUnits: responseFeeBaseUnits })
+      : describeCrossChainFees({ amountBaseUnits: amountBaseUnits.toString(), feeBaseUnits: '0' }) } : {}),
   };
 
   enqueueWebhookDeliveries(id, 'payment.created', responseBody as unknown as Record<string, unknown>, env);

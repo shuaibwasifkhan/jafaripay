@@ -22,7 +22,7 @@
 
 import { isTerminalState } from './cctp-state.js';
 import { getDb } from '../db/schema.js';
-import { describeCrossChainFees, type CrossChainFeeBreakdown } from '../lib/fees.js';
+import { describeCrossChainFees, describeForwardingFees, type CrossChainFeeBreakdown } from '../lib/fees.js';
 
 /** A transfer row's subset of columns the projection consumes. */
 export interface CrossChainTransferRow {
@@ -47,6 +47,24 @@ export interface CrossChainTransferRow {
   failure_reason: string | null;
   created_at: number;
   updated_at: number;
+}
+
+/**
+ * PHASE 1 — project the fee breakdown for a STORED transfer row. An observed
+ * fee > 0 is only possible on a FORWARDING route (DIRECT Standard burns carry
+ * maxFee 0), where the fee is ADDITIVE: the customer burned M + F and the
+ * merchant received exactly M. A zero/garbage fee keeps the Standard 1:1
+ * description, identical to the pre-forwarding surface.
+ */
+export function projectStoredFees(amountBaseUnits: string, feeBaseUnits: string | null): CrossChainFeeBreakdown {
+  let fee = 0n;
+  try {
+    const v = BigInt(feeBaseUnits ?? '0');
+    fee = v > 0n ? v : 0n;
+  } catch { fee = 0n; }
+  return fee > 0n
+    ? describeForwardingFees({ merchantAmountBaseUnits: amountBaseUnits, forwardingFeeBaseUnits: fee.toString() })
+    : describeCrossChainFees({ amountBaseUnits, feeBaseUnits: '0' });
 }
 
 /** Coarse lifecycle bucket the UI keys its banner colour off. */
@@ -183,7 +201,13 @@ export function projectCrossChainStatus(row: CrossChainTransferRow): CrossChainS
     mint_recipient: row.mint_recipient,
     amount_base_units: row.amount_base_units,
     fee_base_units: row.fee_base_units,
-    fees: describeCrossChainFees({ amountBaseUnits: row.amount_base_units, feeBaseUnits: row.fee_base_units }),
+    // PHASE 1 — MONEY-FACING CORRECTNESS: on this ledger an observed fee > 0 is
+    // ONLY possible on a FORWARDING route (DIRECT Standard burns carry maxFee 0),
+    // and the fee is ADDITIVE: the customer burned M + F while the merchant
+    // received EXACTLY M (row.amount_base_units is the settlement amount, proven
+    // against the burn event in cctp-source). Describing F as a deduction would
+    // wrongly imply the merchant was short-paid by F.
+    fees: projectStoredFees(row.amount_base_units, row.fee_base_units),
     attestation_status: row.attestation_status,
     claim_status: row.claim_status,
     failure_reason: row.failure_reason,

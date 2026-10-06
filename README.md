@@ -41,7 +41,7 @@ Implemented and available to integrate (across the supported production EVM main
 - **Payment Links** — shareable hosted USDC links (`/pay/:id`)
 - **On-chain Payment Verification** — backend re-verifies every transfer against the network's RPC
 - **Direct Merchant Settlement** — customer USDC lands in the merchant's settlement wallet
-- **Cross-chain Settlement to Arc** — opt-in Circle CCTP v2 route: pay native USDC on Base, Arbitrum, Polygon, Avalanche, OP, Linea or Unichain and receive 1:1 in the merchant's one pinned Arc wallet (non-custodial, `maxFee=0`); Arc→Arc and every other network stay same-chain
+- **Cross-chain Settlement to Arc** — opt-in Circle CCTP v2 route with Forwarding: pay native USDC on Base, Arbitrum, Polygon, Avalanche, OP, Linea or Unichain — the customer burns the payment amount plus the server-quoted Circle forwarding fee on the source, and the merchant receives exactly the requested amount in the merchant's one pinned Arc wallet (non-custodial); Arc→Arc and every other network stay same-chain
 - **Signed Webhooks** — HMAC-SHA256 event deliveries with retries and replay protection
 - **Receipts** — automatic on-chain receipts with email + public link
 - **API Keys** — per-project `pk_`/`sk_` key pairs (test and live)
@@ -147,11 +147,11 @@ Public checkout endpoints (no auth, used by the hosted page):
 - `GET  /api/checkout/:id` — public Payment Intent details for rendering checkout.
 - `POST /api/checkout/:id/verify` — submit the on-chain `tx_hash`; the backend runs full independent verification before crediting.
 
-The in-app developer docs (`/docs`, rendered from `src/components/docs/DocsPage.tsx`) additionally describe an embeddable browser SDK surface (`JafariPay.checkout()` / `JafariPay.mount()`). Note: the hosted checkout page and REST API are the integration paths shipped in this repository; use the hosted `checkout_url` for the simplest integration.
+The in-app developer docs (`/docs`, rendered from `src/components/docs/DocsPage.tsx`) describe the same three integration paths — the REST API, the hosted checkout endpoints above, and the JavaScript SDK (`JafariPay.checkout()` / `JafariPay.mount()`). All of them, including the SDK source (`src/sdk/`, built to `dist/sdk.js`), ship in this repository; use the hosted `checkout_url` for the simplest integration.
 
 ### Webhooks
 
-Signed event deliveries (`server/webhooks/delivery.ts`). Each request carries an `X-JafariPay-Signature` header of the form `t=<timestamp>,v1=<hmacSha256>`, where the signed payload is `` `${timestamp}.${rawBody}` ``. Verify it with your endpoint secret and a constant-time comparison. Delivery retries on non-2xx with backoff. Implemented events include `payment.created`, `payment.processing`, `payment.succeeded`, `payment.failed`, and `payment.expired`.
+Signed event deliveries (`server/webhooks/delivery.ts`). Each request carries an `X-JafariPay-Signature` header of the form `t=<timestamp>,v1=<hmacSha256>`, where the signed payload is `` `${timestamp}.${rawBody}` ``. Verify it with your endpoint secret and a constant-time comparison. Delivery retries on non-2xx with backoff. The seven deliverable events (exactly the endpoints' subscribable set, `VALID_EVENTS` in `server/api/webhooks.ts`) are `payment.created`, `payment.processing`, `payment.succeeded`, `payment.failed`, `payment.expired`, `payment.cross_chain.attestation_received`, and `payment.cross_chain.failed`.
 
 ## Security & reliability
 
@@ -181,20 +181,28 @@ bun run start      # start the Bun + Express server (default port 3001)
 bun run dev
 ```
 
-Environment variables (names only — never commit real values):
+Environment variables (names only — never commit real values). "production required" means the fail-closed boot guard (`server/lib/production-config.ts`) refuses to start `NODE_ENV=production` without it; see `.env.example` for the authoritative template.
 
-| Variable | Purpose |
-|---|---|
-| `NODE_ENV` | Set to `production` for deployment. |
-| `PORT` | Server port (default `3001`). |
-| `SESSION_SECRET` | HMAC key for session tokens (required in production). |
-| `API_KEY_HMAC_SECRET` | HMAC key for API-key hashing (required in production). |
-| `WEBHOOK_HMAC_SECRET` | HMAC key for webhook-secret hashing (required in production). |
-| `ALLOWED_ORIGINS` | Comma-separated allowed browser origins. |
-| `CHECKOUT_BASE_URL` | Public base URL used to build `checkout_url`. |
-| `JAFARIPAY_DOMAIN` | Domain shown in the SIWE sign-in message. |
-| `DATABASE_URL` | SQLite file path (defaults to `./data/jafaripay.db`). |
-| `ENABLE_LIVE_PAYMENTS` | Leave unset for testnet-only; `true` enables live-class (mainnet) payments across all supported networks. |
+| Variable | Class | Purpose |
+|---|---|---|
+| `NODE_ENV` | production required | Set to `production` for deployment. |
+| `PORT` | optional | Server port (default `3001`). |
+| `DATABASE_URL` | production required | SQLite file path (defaults to `./data/jafaripay.db`). |
+| `SESSION_SECRET` | production required (≥16 chars) | HMAC key for session tokens. |
+| `API_KEY_HMAC_SECRET` | production required (≥16 chars) | HMAC key for API-key hashing. |
+| `WEBHOOK_HMAC_SECRET` | production required (≥16 chars) | HMAC key for webhook identity signing. |
+| `WEBHOOK_SIGNING_ENC_KEY` | production required (≥16 chars, stable) | AES-256-GCM key encrypting raw webhook signing secrets at rest; rotating it makes existing ciphertext undecryptable until each secret is re-saved. |
+| `ALLOWED_ORIGINS` | production required | Comma-separated CORS allowlist (https). |
+| `CHECKOUT_BASE_URL` | production required | Public base URL used to build `checkout_url` (https). |
+| `JAFARIPAY_DOMAIN` | production required | Domain shown in the SIWE sign-in message. |
+| `ENABLE_LIVE_PAYMENTS` | gate (must be `true` to serve live) | Unset/false = testnet-only; `true` enables live-class (mainnet) payments across the supported networks. |
+| `RPC_PROXY_BASE_URL`, `RPC_PROXY_CHAINS`, `RPC_PROXY_TOKEN` | optional (all-or-nothing) | Shared RPC-proxy deployment model; if a base URL is set, the chains list and token are required and unmapped networks fail closed. Leave unset to use direct curated RPCs. |
+| `EMAIL_TRANSPORT` | optional | `dev` (in-memory sink, default) \| `none` (explicit no-op) \| `brevo_smtp` (production relay). |
+| `EMAIL_BREVO_SMTP_LOGIN`, `EMAIL_BREVO_SMTP_KEY` | required when `EMAIL_TRANSPORT=brevo_smtp` | Brevo SMTP credentials (injected via secret manager, never committed). |
+| `EMAIL_FROM` | required when `brevo_smtp` | The Brevo-verified sender address for receipt mail. |
+| `EMAIL_BREVO_SMTP_HOST`, `EMAIL_BREVO_SMTP_PORT`, `EMAIL_BREVO_TIMEOUT_MS` | optional | Connection overrides (defaults: `smtp-relay.brevo.com`, `587`, `15000`). |
+| `EMAIL_DEV_FAIL` | test-only | Forces email failure in tests; the boot guard rejects it in production. |
+| `E2E_SOURCE_PK`, `E2E_RELAYER_PK` | test-only (testnet signer keys) | Used by local cross-chain E2E scripts; the boot guard rejects any production boot that carries them. |
 
 See `docs/DEPLOYMENT.md` for full VPS/Nginx/HTTPS deployment instructions.
 
@@ -208,30 +216,41 @@ bunx oxlint server                    # lint (server)
 bun run build                         # production frontend build
 ```
 
-The current test suite (`server/payment-expiry.test.ts`) covers the payment settlement-grace behavior and the verification rules (recipient, amount, token/contract, duplicate/replay, idempotency, worker expiry). Tests mock only external blockchain RPC I/O; the real verification pipeline executes against an isolated temporary SQLite database.
+Run the test suite with `bun test` (no fixed count is maintained here — the suite grows with the project). It covers the payment settlement-grace behavior and the verification rules (recipient, amount, token/contract, duplicate/replay, idempotency, worker expiry), plus the CCTP cross-chain source/attestation/destination pipeline, forwarding-fee quoting and its API/checkout presentation, the webhook signing/replay/SSRF matrix, receipts and the email transport, payment links, and the production-config boot guard. Tests mock only external blockchain RPC I/O; the real verification pipeline executes against an isolated temporary SQLite database.
 
 ## Project structure
 
 ```
 server/
   index.ts                 Express app: security headers, CORS, routes, static serving
-  api/                     REST routes: payment-intents, checkout, payments, webhooks,
-                           api-keys, projects, settlement-wallets, auth
+  api/                     REST routes: payment-intents, checkout, payments, payment-links,
+                           receipts, webhooks, webhook-deliveries, api-keys, projects,
+                           settlement-wallets, auth
   auth/siwe.ts             SIWE / EIP-4361 wallet authentication + sessions
-  blockchain/arc-provider.ts   Arc RPC provider, USDC Transfer decoding, payment verifier
+  blockchain/              arc-provider.ts (ERC-20 Transfer verification) and the CCTP
+                           engine: cctp-source, cctp-attestation, cctp-destination,
+                           cctp-forwarding-fee, cctp-status (cross-chain state machine)
   db/schema.ts             SQLite schema + migrations + network config seeding
-  lib/money.ts             Exact USDC base-unit arithmetic
+  db/networks.ts, db/cctp.ts  Network registry + Circle CCTP source/destination table
+  email/                   EmailTransport abstraction (dev sink / none / brevo-smtp)
+  lib/                     money.ts (exact base-unit math), fees.ts (fee presentation),
+                           production-config.ts (fail-closed boot guard)
   middleware/auth.ts       API-key + session auth, tenant scoping
   webhooks/delivery.ts     Signed webhook delivery + retries + SSRF guard
-  workers/reconciliation.ts    Expiry / stuck recovery / webhook worker
+  workers/reconciliation.ts    Expiry / stuck recovery / webhook / cross-chain driver
 src/
-  components/checkout/     Hosted checkout page
+  components/checkout/     Hosted checkout page (same-chain + CCTP burn paths)
   components/dashboard/    Merchant dashboard (projects, keys, payments, webhooks, settings)
   components/docs/         In-app developer documentation
+  components/landing/      Public landing + roadmap pages
+  sdk/                     JavaScript SDK source (built by vite.sdk.config.ts → dist/sdk.js)
+  cctp-checkout.ts         Wallet transaction planner for the checkout page
   config.ts                wagmi/viem chain + transport config
-  onchain-facts.ts         Chain/USDC facts (generated)
-contracts/                 Solidity + Foundry scaffolding
-docs/                      DEPLOYMENT.md, UAT-REPORT.md
+  onchain-facts.ts, supported-chains.ts  Chain/USDC facts + frontend network allowlist
+contracts/                 Solidity + Foundry scaffolding and unit tests
+docs/                      Authority docs (production readiness, operator runbook, CCTP
+                           executor decision, deployment) + dated engineering phase reports
+scripts/                   Build/ops helper scripts
 ```
 
 ## Reusable primitives for builders

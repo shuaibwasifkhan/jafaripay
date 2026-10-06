@@ -284,7 +284,7 @@ export default function LandingPage() {
               <span className="text-sm font-semibold text-ink">Payment Intent</span>
             </div>
             <div className="rounded-xl bg-sand-100 border border-sand-200 p-4">
-              <p className="text-xs font-mono text-slate-600 mb-3"><span className="text-forest-700 font-semibold">POST</span> /v1/payment_intents</p>
+              <p className="text-xs font-mono text-slate-600 mb-3"><span className="text-forest-700 font-semibold">POST</span> /v1/payment-intents</p>
               <div className="space-y-1.5 text-xs font-mono">
                 <p className="text-slate-600"><span className="text-lilac-600">"amount"</span>: <span className="text-gold-600">"1.00"</span>,</p>
                 <p className="text-slate-600"><span className="text-lilac-600">"currency"</span>: <span className="text-gold-600">"USDC"</span>,</p>

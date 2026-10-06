@@ -53,7 +53,7 @@ const PHASES: Phase[] = [
     },
     items: [
       { icon: Globe, title: 'Multi-Chain USDC', desc: 'Accept native USDC across 10 supported EVM mainnets — Arc, Base, Arbitrum, Polygon, Avalanche, Optimism, Linea, Unichain, zkSync Era, and Celo.' },
-      { icon: ArrowLeftRight, title: 'Cross-chain to Arc', desc: 'Opt-in Circle CCTP v2 route: a customer pays native USDC on Base, Arbitrum, Polygon, Avalanche, OP, Linea or Unichain, and the merchant receives 1:1 in their one pinned Arc wallet — non-custodial, maxFee=0. Arc→Arc and every other network stay same-chain.' },
+      { icon: ArrowLeftRight, title: 'Cross-chain to Arc', desc: 'Opt-in Circle CCTP v2 route with Forwarding: a customer pays native USDC on Base, Arbitrum, Polygon, Avalanche, OP, Linea or Unichain — burning the payment amount plus the server-quoted Circle forwarding fee — and the merchant receives exactly the requested amount in their one pinned Arc wallet, non-custodial. Arc→Arc and every other network stay same-chain.' },
       { icon: Target, title: 'Payment Intents', desc: 'Server-side intents pin amount, currency, network, and order metadata. Idempotent by design.' },
       { icon: ShoppingCart, title: 'Hosted Checkout', desc: 'One integration: wallet connect, network switch, and USDC transfer handled for you.' },
       { icon: ShieldCheck, title: 'On-Chain Verification', desc: 'Token contract, recipient, and exact amount verified against the ERC-20 Transfer event.' },
