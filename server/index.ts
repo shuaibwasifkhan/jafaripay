@@ -13,6 +13,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { migrate } from './db/schema.js';
 import { CSP_CONNECT_SRC } from './lib/csp.js';
+import { validateProductionConfig } from './lib/production-config.js';
 import { requestId } from './middleware/auth.js';
 import { startWorker } from './workers/reconciliation.js';
 
@@ -32,22 +33,18 @@ import paymentLinksRouter, { payRouter } from './api/payment-links.js';
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// ── Production secret guard ────────────────────────────────────────────────
-// In production, refuse to boot with default/dev secrets. These are used for
-// session token signing and API-key/webhook HMACs — running with the shared
-// dev fallbacks in production would let anyone forge sessions or API keys.
-// Never log the values themselves, only which var is missing.
+// ── Production secret + config guard (fail closed before the port opens) ───
+// In production, refuse to boot with default/dev secrets or a silently-broken
+// configuration. validateProductionConfig() audits secrets (presence + length),
+// CORS/origin/checkout routing, the D-4 email transport wiring, RPC-proxy
+// integrity, and the absence of testnet E2E signer keys. Findings name ONLY
+// env vars — values are never logged.
 if (IS_PROD) {
-  const requiredSecrets = ['SESSION_SECRET', 'API_KEY_HMAC_SECRET', 'WEBHOOK_HMAC_SECRET', 'WEBHOOK_SIGNING_ENC_KEY'];
-  const missing = requiredSecrets.filter((name) => {
-    const v = process.env[name];
-    return !v || v.length < 16;
-  });
-  if (missing.length > 0) {
-    console.error(
-      `[JafariPay] FATAL: production requires strong secrets for: ${missing.join(', ')}. ` +
-      'Set each to a unique random value of at least 16 characters and restart.'
-    );
+  const issues = validateProductionConfig(process.env);
+  if (issues.length > 0) {
+    console.error(`[JafariPay] FATAL: production configuration is incomplete (${issues.length} issue(s)):`);
+    for (const issue of issues) console.error(`  - ${issue}`);
+    console.error('Fix the variables above and restart. No secret VALUES are printed.');
     process.exit(1);
   }
 }
@@ -75,11 +72,13 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS — allow the frontend dev server + production domain
+// CORS — allow the frontend dev server + production domain.
+// The localhost fallbacks are DEV-ONLY: in production the allowlist is exactly
+// ALLOWED_ORIGINS (validated fail-closed at boot above), so a stray dev origin
+// can never ride into a live deployment.
 const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  ...(process.env.ALLOWED_ORIGINS?.split(',') || []),
+  ...(IS_PROD ? [] : ['http://localhost:5173', 'http://localhost:3000']),
+  ...(process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean) || []),
 ];
 
 app.use(cors({

@@ -12,10 +12,48 @@ import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider
 import { enqueueWebhookDeliveries } from '../webhooks/delivery.js';
 import { issueReceiptForPayment } from '../receipts/service.js';
 import { isValidEmail, normalizeEmail } from '../email/transport.js';
+import {
+  isCctpSource, arcDestinationForEnvironment, NOT_A_CCTP_SOURCE, CCTP_REGISTRY,
+  ARC_MAINNET_SLUG, ARC_TESTNET_SLUG,
+} from '../db/cctp.js';
+import { loadCrossChainStatus } from '../blockchain/cctp-status.js';
+import { describeCrossChainFees } from '../lib/fees.js';
+import { applyForwardingQuote, ForwardingFeeError, type ApplyForwardingQuote } from '../blockchain/cctp-forwarding-fee.js';
+import type { FetchLike } from '../blockchain/cctp-attestation.js';
 
 const router = Router();
 const CHECKOUT_BASE = process.env.CHECKOUT_BASE_URL || 'https://jafari.co.in';
 const PI_EXPIRY_S = 60 * 60; // 1 hour
+
+// ── STEP 5N — SERVER-AUTHORITATIVE FORWARDING QUOTE (HTTP integration) ─────
+// The Circle Forwarding fee F is DYNAMIC and can only be sourced from Circle
+// immediately before the payment; it is NEVER a client-chosen number. The
+// module `applyForwardingQuote` (implemented + unit-tested in Step 5) turns
+// Circle's live Standard(2000) quote into the server-approved F and persists it
+// into payment_intents.forwarding_max_fee_base_units — the ONLY place that column
+// is ever written. The intent-creation INSERT below never reads any client fee
+// field, so a browser-supplied forwarding_max_fee_base_units can never reach the
+// DB (proven by P3-10 / P3-11). The production `fetch` + registry resolver sit
+// behind a restorable seam so this wiring is unit-testable without live Circle
+// I/O (mirrors the `spyOn` discipline the same-chain route tests use). A quote
+// failure leaves the intent a DIRECT (F=0) route instead of 500-ing a valid
+// payment — it never silently authorizes an arbitrary client fee.
+let forwardingQuoteImpl: ApplyForwardingQuote = applyForwardingQuote;
+/** Test seam. Pass null to restore the real Circle-backed quote. */
+export function setForwardingQuoteForTest(fn: ApplyForwardingQuote | null): void {
+  forwardingQuoteImpl = fn ?? applyForwardingQuote;
+}
+
+const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+
+/** Resolve a source slug to its Circle CCTP domain + environment class, from the registry. */
+function registryResolveSource(sourceSlug: string): { sourceDomain: number; isTestnet: boolean } {
+  const cfg = CCTP_REGISTRY[sourceSlug];
+  if (!cfg || cfg.supportedAsSource !== true) {
+    throw new ForwardingFeeError(`resolveSource: "${sourceSlug}" is not a registered CCTP cross-chain source`);
+  }
+  return { sourceDomain: cfg.cctpDomain, isTestnet: cfg.isTestnet };
+}
 
 function hashRequest(body: unknown): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex');
@@ -78,8 +116,12 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
   // `network` is the single documented slug-based selector; we deliberately do
   // NOT add a second chain_id-based way to choose a network.
   const requestedNetwork = (req.body as { network?: unknown }).network;
+  const crossChainRequested = (req.body as { cross_chain?: unknown }).cross_chain === true;
   let network: string;
   if (requestedNetwork === undefined || requestedNetwork === null || requestedNetwork === '') {
+    if (crossChainRequested) {
+      res.status(400).json({ error: 'network (the customer source chain) is required when cross_chain is true', code: 'invalid_network' }); return;
+    }
     network = env === 'live' ? 'arc_mainnet' : 'arc_testnet';
   } else if (typeof requestedNetwork === 'string') {
     network = requestedNetwork.trim();
@@ -106,18 +148,59 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
     }); return;
   }
 
-  // Settlement wallet must belong to this merchant, be active, and match the
-  // selected network — reuses the existing per-network wallet architecture.
+  // ── CCTP PHASE 3: cross-chain source/settlement resolution. When cross_chain
+  // is requested, the intent's network/chain_id/usdc_address describe the SOURCE
+  // (the chain the customer pays on, where the burn is detected in PHASE 5), while
+  // settlement is pinned to the merchant's ONE Arc wallet. The merchant does NOT
+  // configure a per-source settlement wallet. Same-chain (cross_chain absent/
+  // false) is byte-identical to today: source/settlement columns stay NULL and
+  // the legacy network columns are the whole story. zkSync Era / Celo (and any
+  // non-CCTP chain) get a machine-readable unsupported error — never a silent
+  // non-Circle fallback.
+  let isCrossChain = false;
+  let settlementNetwork = network;
+  let settlementChainId = netConfig.chain_id;
+  let sourceNetwork: string | null = null;
+  let sourceChainId: number | null = null;
+  let destinationDomain: number | null = null;
+  if (crossChainRequested) {
+    if (network === ARC_MAINNET_SLUG || network === ARC_TESTNET_SLUG) {
+      res.status(400).json({ error: `Network "${network}" is the Arc settlement destination (same-chain), not a cross-chain source`, code: 'cross_chain.source_is_destination' }); return;
+    }
+    if (NOT_A_CCTP_SOURCE.includes(network) || !isCctpSource(network)) {
+      const supportedSources = Object.values(CCTP_REGISTRY).filter((c) => c.supportedAsSource && !c.isTestnet).map((c) => c.slug);
+      res.status(400).json({
+        error: `Network "${network}" is not a Circle CCTP cross-chain source; it may still be used for same-chain settlement. Supported cross-chain sources: ${supportedSources.join(', ')}.`,
+        code: 'cross_chain.unsupported_source',
+        supported_sources: supportedSources,
+      }); return;
+    }
+    const dest = arcDestinationForEnvironment(env);
+    const destConfig = db.prepare('SELECT chain_id,is_enabled FROM network_configs WHERE network=?').get(dest.slug) as { chain_id: number; is_enabled: number } | null;
+    if (!destConfig || destConfig.is_enabled !== 1) {
+      res.status(500).json({ error: `Arc destination "${dest.slug}" is not configured/enabled`, code: 'cross_chain.destination_unavailable' }); return;
+    }
+    isCrossChain = true;
+    settlementNetwork = dest.slug;
+    settlementChainId = destConfig.chain_id;
+    destinationDomain = dest.domain;
+    sourceNetwork = network;
+    sourceChainId = netConfig.chain_id;
+  }
+
+  // Settlement wallet must belong to this merchant, be active, and live on the
+  // settlement network — Arc for cross-chain (the merchant's ONE destination
+  // wallet), the payment network for same-chain. The customer can never move it.
   type SwRow = { id: string; address: string; network: string };
   let sw: SwRow | null = null;
   if (settlement_wallet_id) {
     sw = db.prepare('SELECT id,address,network FROM settlement_wallets WHERE id=? AND merchant_id=? AND network=? AND is_active=1')
-      .get(settlement_wallet_id, merchantId, network) as SwRow | null;
-    if (!sw) { res.status(400).json({ error: 'Settlement wallet not found or wrong network' }); return; }
+      .get(settlement_wallet_id, merchantId, settlementNetwork) as SwRow | null;
+    if (!sw) { res.status(400).json({ error: isCrossChain ? 'Arc settlement wallet not found for this merchant on the settlement network' : 'Settlement wallet not found or wrong network' }); return; }
   } else {
     sw = db.prepare('SELECT id,address,network FROM settlement_wallets WHERE merchant_id=? AND network=? AND is_active=1 LIMIT 1')
-      .get(merchantId, network) as SwRow | null;
-    if (!sw) { res.status(400).json({ error: 'No settlement wallet configured. Add one in the dashboard.', code: 'setup.no_settlement_wallet' }); return; }
+      .get(merchantId, settlementNetwork) as SwRow | null;
+    if (!sw) { res.status(400).json({ error: isCrossChain ? 'No Arc settlement wallet configured. Add one in the dashboard.' : 'No settlement wallet configured. Add one in the dashboard.', code: 'setup.no_settlement_wallet' }); return; }
   }
 
   const id = generatePaymentIntentId();
@@ -125,10 +208,29 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
   // Preserve original input string for display (e.g. "1.00" not "1.000000")
   const amountDecimal = amount.trim();
 
-  db.prepare(`INSERT INTO payment_intents(id,merchant_id,project_id,settlement_wallet_id,settlement_address,network,chain_id,usdc_address,amount_decimal,amount_base_units,currency,order_id,description,metadata,environment,expires_at,customer_email) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, merchantId, projectId, sw.id, sw.address, network, netConfig.chain_id, netConfig.usdc_address, amountDecimal, amountBaseUnits.toString(), currency, order_id || null, description || '', JSON.stringify(metadata), env, expiresAt, customerEmail);
+  db.prepare(`INSERT INTO payment_intents(id,merchant_id,project_id,settlement_wallet_id,settlement_address,network,chain_id,usdc_address,amount_decimal,amount_base_units,currency,order_id,description,metadata,environment,expires_at,customer_email,source_network,source_chain_id,settlement_network,settlement_chain_id,is_cross_chain) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, merchantId, projectId, sw.id, sw.address, network, netConfig.chain_id, netConfig.usdc_address, amountDecimal, amountBaseUnits.toString(), currency, order_id || null, description || '', JSON.stringify(metadata), env, expiresAt, customerEmail,
+      sourceNetwork, sourceChainId, isCrossChain ? settlementNetwork : null, isCrossChain ? settlementChainId : null, isCrossChain ? 1 : 0);
 
   db.prepare('INSERT INTO payment_events(id,payment_intent_id,event_type,to_status) VALUES(?,?,?,?)').run(generateId('pe'), id, 'payment.created', 'requires_payment');
+
+  // STEP 5N — SERVER-AUTHORITATIVE FORWARDING QUOTE (cross-chain only).
+  // The intent row now legitimately exists, so we can derive the DYNAMIC Circle
+  // Forwarding fee F and persist it into forwarding_max_fee_base_units via the
+  // existing, unit-tested applyForwardingQuote. This is the ONLY place F is set;
+  // no client field is ever read here. Fail-safe: a Circle/RPC error leaves F at
+  // its 0 default so the intent is still created and simply resolves to a DIRECT
+  // (non-forwarding) checkout route — a failed quote NEVER authorizes an
+  // arbitrary client fee and NEVER 500s an otherwise-valid payment.
+  if (isCrossChain) {
+    try {
+      await forwardingQuoteImpl({
+        paymentIntentId: id,
+        fetchImpl: defaultFetch,
+        resolveSource: registryResolveSource,
+      });
+    } catch { /* fail-safe: stay DIRECT (forwarding_max_fee_base_units remains 0) */ }
+  }
 
   const responseBody = {
     id, status: 'requires_payment', amount: amountDecimal, amount_base_units: amountBaseUnits.toString(),
@@ -136,6 +238,11 @@ router.post('/', requireApiKey({ requireSecret: true }), async (req: Request, re
     order_id: order_id || null, description: description || '',
     settlement_address: sw.address, checkout_url: `${CHECKOUT_BASE}/checkout/${id}`,
     expires_at: expiresAt, created_at: Math.floor(Date.now() / 1000),
+    cross_chain: isCrossChain,
+    ...(isCrossChain ? { source_network: sourceNetwork, source_chain_id: sourceChainId, settlement_network: settlementNetwork, settlement_chain_id: settlementChainId, cctp_destination_domain: destinationDomain } : {}),
+    // PHASE 14 (additive): the merchant sees the exact fee/net breakdown at the
+    // moment of creation — Standard CCTP is 1:1, so net_amount equals the amount.
+    ...(isCrossChain ? { fees: describeCrossChainFees({ amountBaseUnits: amountBaseUnits.toString(), feeBaseUnits: '0' }) } : {}),
   };
 
   enqueueWebhookDeliveries(id, 'payment.created', responseBody as unknown as Record<string, unknown>, env);
@@ -174,15 +281,22 @@ router.get('/:id', requireApiKey(), (req: Request, res: Response) => {
   const pi = db.prepare('SELECT * FROM payment_intents WHERE id=? AND merchant_id=?').get(req.params.id, ar.merchantId!) as Record<string, unknown> | null;
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
   const payment = db.prepare('SELECT * FROM payments WHERE payment_intent_id=?').get(req.params.id);
-  res.json({ ...pi, checkout_url: `${CHECKOUT_BASE}/checkout/${req.params.id}`, payment: payment || null });
+  // PHASE 13 (additive): surface the cross-chain journey only for a cross-chain
+  // intent that actually has a transfer row; a same-chain intent keeps its exact
+  // prior shape (no `cross_chain` key at all).
+  const crossChain = (pi.is_cross_chain === 1) ? loadCrossChainStatus(req.params.id as string) : null;
+  res.json({ ...pi, checkout_url: `${CHECKOUT_BASE}/checkout/${req.params.id}`, payment: payment || null, ...(crossChain ? { cross_chain: crossChain } : {}) });
 });
 
 // Public (checkout page) — no auth, limited fields
 router.get('/:id/public', (req: Request, res: Response) => {
   const db = getDb();
-  const pi = db.prepare(`SELECT pi.id,pi.status,pi.amount_decimal,pi.amount_base_units,pi.currency,pi.network,pi.chain_id,pi.usdc_address,pi.settlement_address,pi.description,pi.order_id,pi.expires_at,pi.created_at,m.name AS merchant_name FROM payment_intents pi JOIN merchants m ON m.id=pi.merchant_id WHERE pi.id=?`).get(req.params.id) as Record<string, unknown> | null;
+  const pi = db.prepare(`SELECT pi.id,pi.status,pi.amount_decimal,pi.amount_base_units,pi.currency,pi.network,pi.chain_id,pi.usdc_address,pi.settlement_address,pi.is_cross_chain,pi.source_network,pi.source_chain_id,pi.settlement_network,pi.settlement_chain_id,pi.description,pi.order_id,pi.expires_at,pi.created_at,m.name AS merchant_name FROM payment_intents pi JOIN merchants m ON m.id=pi.merchant_id WHERE pi.id=?`).get(req.params.id) as Record<string, unknown> | null;
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
-  res.json(pi);
+  // PHASE 13 (additive): let the checkout page show cross-chain progress. Only
+  // public facts are exposed (no attestation signature / internal bookkeeping).
+  const crossChain = (pi.is_cross_chain === 1) ? loadCrossChainStatus(req.params.id as string) : null;
+  res.json({ ...pi, ...(crossChain ? { cross_chain: crossChain } : {}) });
 });
 
 // ── POST /v1/payment-intents/:id/cancel ──────────────────────────────────
@@ -207,9 +321,17 @@ router.post('/:id/verify', requireApiKey(), async (req: Request, res: Response) 
   const { tx_hash, chain_id } = req.body as { tx_hash: string; chain_id?: number };
   if (!tx_hash) { res.status(400).json({ error: 'tx_hash is required' }); return; }
 
-  type PiFullRow = { id: string; status: string; network: string; settlement_address: string; amount_base_units: string; usdc_address: string; chain_id: number; amount_decimal: string; environment: string; merchant_id: string; expires_at: number };
+  type PiFullRow = { id: string; status: string; network: string; settlement_address: string; amount_base_units: string; usdc_address: string; chain_id: number; amount_decimal: string; environment: string; merchant_id: string; expires_at: number; is_cross_chain: number };
   const pi = db.prepare('SELECT * FROM payment_intents WHERE id=? AND merchant_id=?').get(req.params.id, ar.merchantId!) as PiFullRow | null;
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
+
+  // CCTP PHASE 3 SAFETY GUARD: a cross-chain intent must NEVER be credited
+  // through the same-chain verify path (that would pay out before the funds
+  // arrive on Arc). Cross-chain settlement is verified only after the Arc-side
+  // mint is confirmed (PHASE 8). Fail closed here rather than risk early credit.
+  if (pi.is_cross_chain === 1) {
+    res.status(400).json({ error: 'Cross-chain intent: settlement is credited only after Arc destination verification, not via same-chain verify.', code: 'cross_chain.wrong_verify_endpoint' }); return;
+  }
 
   // chain_id is REQUIRED and must equal the PI's pinned chain_id. The persisted
   // PI row is the source of truth (verification below uses ONLY the PI snapshot,

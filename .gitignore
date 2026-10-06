@@ -18,6 +18,10 @@ dist/
 console.jsonl
 traces.jsonl
 
+# ── Local throwaway / IDE state (never part of the app) ─────────────
+scratch/
+.qoder/
+
 # ── Solidity build output / vendored deps ────────────────────────────
 contracts/out/
 contracts/cache/

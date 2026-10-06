@@ -41,6 +41,7 @@ Implemented and available to integrate (across the supported production EVM main
 - **Payment Links** — shareable hosted USDC links (`/pay/:id`)
 - **On-chain Payment Verification** — backend re-verifies every transfer against the network's RPC
 - **Direct Merchant Settlement** — customer USDC lands in the merchant's settlement wallet
+- **Cross-chain Settlement to Arc** — opt-in Circle CCTP v2 route: pay native USDC on Base, Arbitrum, Polygon, Avalanche, OP, Linea or Unichain and receive 1:1 in the merchant's one pinned Arc wallet (non-custodial, `maxFee=0`); Arc→Arc and every other network stay same-chain
 - **Signed Webhooks** — HMAC-SHA256 event deliveries with retries and replay protection
 - **Receipts** — automatic on-chain receipts with email + public link
 - **API Keys** — per-project `pk_`/`sk_` key pairs (test and live)
@@ -48,7 +49,7 @@ Implemented and available to integrate (across the supported production EVM main
 - **JavaScript SDK** — drop-in `/sdk.js` checkout launcher
 - **Wallet-based Authentication** — SIWE / EIP-4361 sign-in for the merchant dashboard
 
-Planned / future (**not** yet available): **Invoices, Recurring & Advanced Billing, Agent/M2M payments, Payment Firewall** — see the public roadmap for their status. Multi-chain USDC, Payment Links, Receipts, and webhooks are shipped.
+Planned / future (**not** yet available): **Invoices, Recurring & Advanced Billing, Agent/M2M payments, Payment Firewall** — see the public roadmap for their status. Multi-chain USDC, cross-chain settlement to Arc (Circle CCTP), Payment Links, Receipts, and webhooks are shipped.
 
 ## Payment flow
 

@@ -200,6 +200,136 @@ function ensureReceiptsSchema(db: Database): void {
   db.run('CREATE INDEX IF NOT EXISTS idx_receipts_email_status ON receipts(email_status, next_email_attempt_at)');
 }
 
+// ── CCTP MASTER PHASE 2: cross-chain settlement data model ──────────────
+// Purely ADDITIVE and backward compatible, each step guarded so re-running
+// migrate() is a no-op:
+//   1. payment_intents DECOUPLING columns. A cross-chain intent must know BOTH
+//      where the customer pays (source) and where the merchant receives
+//      (settlement, always Arc). For every EXISTING same-chain row these stay
+//      NULL, which the code reads as "source == settlement == the legacy
+//      network / chain_id columns" — so no historical intent is rewritten, no
+//      backfill runs, and same-chain behaviour is byte-identical to before.
+//      is_cross_chain is NOT NULL DEFAULT 0, so legacy rows self-classify as
+//      same-chain without any UPDATE. NOTE: these names deliberately avoid the
+//      tokens 'finality'/'confirmation'/'mode' (the phase5h DDL invariant test
+//      asserts payment_intents carries no such column — finality stays live
+//      registry policy, never an intent snapshot).
+//   2. a dedicated cross_chain_transfers table — one row per CCTP burn→mint
+//      journey. The plan requires a separate record so the long CCTP lifecycle
+//      does NOT get crammed into payment_intents (whose simple status enum and
+//      same-chain contract stay unchanged). Partial UNIQUE indexes give
+//      storage-layer idempotency / replay protection (PHASE 10): a source tx,
+//      burn message, CCTP message id or destination tx can never be attached
+//      to two transfers. attestation/claim/state CHECK enums are the PHASE 9
+//      state machine persisted at the row level; a burned-but-unminted transfer
+//      is IN TRANSIT (never 'failed'/'lost').
+function ensureCrossChainSchema(db: Database): void {
+  // (1) payment_intents decoupling columns — additive, nullable, idempotent.
+  if (!hasColumn(db, 'payment_intents', 'source_network')) {
+    db.run(`ALTER TABLE payment_intents ADD COLUMN source_network TEXT`);
+  }
+  if (!hasColumn(db, 'payment_intents', 'source_chain_id')) {
+    db.run(`ALTER TABLE payment_intents ADD COLUMN source_chain_id INTEGER`);
+  }
+  if (!hasColumn(db, 'payment_intents', 'settlement_network')) {
+    db.run(`ALTER TABLE payment_intents ADD COLUMN settlement_network TEXT`);
+  }
+  if (!hasColumn(db, 'payment_intents', 'settlement_chain_id')) {
+    db.run(`ALTER TABLE payment_intents ADD COLUMN settlement_chain_id INTEGER`);
+  }
+  if (!hasColumn(db, 'payment_intents', 'is_cross_chain')) {
+    db.run(`ALTER TABLE payment_intents ADD COLUMN is_cross_chain INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  // STEP 4B — SERVER-AUTHORED CCTP Forwarding fee (DEDUCTED model). Additive, one
+  // column, NOT NULL default '0'. This is the server-approved Forwarding `maxFee`
+  // (F) bound to the intent BEFORE the customer pays. Amount semantics under the
+  // locked Deducted model: merchant settlement target M = amount_base_units (NEVER
+  // changes); the source must burn EXACTLY M + F and declare maxFee EXACTLY F;
+  // Circle deducts F and the merchant still nets M. '0' means DIRECT / no fee and
+  // is byte-for-byte the pre-Step-4 behavior. SECURITY: this value is written ONLY
+  // by the server — the intent-creation INSERT in api/payment-intents.ts omits this
+  // column entirely, so no browser/checkout/metadata/client path can set it; only a
+  // future server-side Forwarding quote may populate it. It is NEVER derived from
+  // the observed burn and NEVER taken from the caller. cross_chain_transfers.fee_
+  // base_units remains the OBSERVED fee and is deliberately NOT reused as approval.
+  if (!hasColumn(db, 'payment_intents', 'forwarding_max_fee_base_units')) {
+    db.run(`ALTER TABLE payment_intents ADD COLUMN forwarding_max_fee_base_units TEXT NOT NULL DEFAULT '0'`);
+  }
+
+  // (2) cross_chain_transfers — full CCTP journey record.
+  db.run(`CREATE TABLE IF NOT EXISTS cross_chain_transfers (
+    id                       TEXT PRIMARY KEY,
+    payment_intent_id        TEXT NOT NULL UNIQUE REFERENCES payment_intents(id) ON DELETE RESTRICT,
+    source_network           TEXT NOT NULL,
+    source_chain_id          INTEGER NOT NULL,
+    source_usdc_address      TEXT NOT NULL,
+    token_messenger          TEXT NOT NULL,
+    source_tx_hash           TEXT,
+    source_block_number      INTEGER,
+    source_finalized_at      INTEGER,
+    burn_message_hash        TEXT,
+    cctp_message_id          TEXT,
+    destination_network      TEXT NOT NULL,
+    destination_chain_id     INTEGER NOT NULL,
+    destination_tx_hash      TEXT,
+    destination_block_number INTEGER,
+    mint_recipient           TEXT NOT NULL,
+    amount_base_units        TEXT NOT NULL,
+    attestation_status       TEXT NOT NULL DEFAULT 'none'
+      CHECK(attestation_status IN ('none','pending','complete','failed','timeout')),
+    attestation              TEXT,
+    claim_status             TEXT NOT NULL DEFAULT 'none'
+      CHECK(claim_status IN ('none','pending','submitted','confirmed','failed')),
+    state                    TEXT NOT NULL DEFAULT 'source_payment_submitted'
+      CHECK(state IN ('source_payment_submitted','source_finalizing','source_finalized',
+        'attestation_pending','attested','destination_pending','destination_submitted',
+        'destination_confirmed','settled','attestation_timeout','destination_failed',
+        'source_reorg','verification_failed')),
+    failure_reason           TEXT,
+    fee_base_units           TEXT NOT NULL DEFAULT '0',
+    created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at               INTEGER NOT NULL DEFAULT (unixepoch())
+  )`);
+  // One transfer per intent (also gives the payment_intent_id lookup index).
+  // Replay protection at the storage layer (all partial: ignore un-filled cols).
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_cct_source_tx ON cross_chain_transfers(source_tx_hash, source_network) WHERE source_tx_hash IS NOT NULL');
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_cct_burn_msg ON cross_chain_transfers(burn_message_hash) WHERE burn_message_hash IS NOT NULL');
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_cct_message_id ON cross_chain_transfers(cctp_message_id) WHERE cctp_message_id IS NOT NULL');
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS uq_cct_dest_tx ON cross_chain_transfers(destination_tx_hash, destination_network) WHERE destination_tx_hash IS NOT NULL');
+  db.run('CREATE INDEX IF NOT EXISTS idx_cct_state ON cross_chain_transfers(state)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_cct_attestation ON cross_chain_transfers(attestation_status)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_cct_claim ON cross_chain_transfers(claim_status)');
+
+  // ── CCTP MASTER PHASE 7: attestation polling bookkeeping. Purely ADDITIVE
+  // (guarded by hasColumn so re-running migrate() is a no-op; a fresh DB that
+  // just created the table above also picks these up). No existing row's money
+  // field is rewritten — this only backs the isolated Circle-attestation worker:
+  //   • cctp_message                : raw CCTP message bytes (hex) whose hash is
+  //                                   cctp_message_id. Written in PHASE 5,
+  //                                   cross-checked against Circle's response in
+  //                                   PHASE 7, and re-submitted with the
+  //                                   attestation to receiveMessage in PHASE 8.
+  //   • attestation_attempts         : polls issued for this burn (backoff counter).
+  //   • next_attestation_attempt_at  : earliest unixepoch() to re-poll (backoff +
+  //                                   rate-limit respect). NULL = ready now.
+  //   • attestation_error            : last non-secret operator detail (never the
+  //                                   attestation/signature, never a secret).
+  if (!hasColumn(db, 'cross_chain_transfers', 'cctp_message')) {
+    db.run(`ALTER TABLE cross_chain_transfers ADD COLUMN cctp_message TEXT`);
+  }
+  if (!hasColumn(db, 'cross_chain_transfers', 'attestation_attempts')) {
+    db.run(`ALTER TABLE cross_chain_transfers ADD COLUMN attestation_attempts INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!hasColumn(db, 'cross_chain_transfers', 'next_attestation_attempt_at')) {
+    db.run(`ALTER TABLE cross_chain_transfers ADD COLUMN next_attestation_attempt_at INTEGER`);
+  }
+  if (!hasColumn(db, 'cross_chain_transfers', 'attestation_error')) {
+    db.run(`ALTER TABLE cross_chain_transfers ADD COLUMN attestation_error TEXT`);
+  }
+  db.run('CREATE INDEX IF NOT EXISTS idx_cct_attest_due ON cross_chain_transfers(attestation_status, next_attestation_attempt_at)');
+}
+
 export function getDb(): Database {
   if (_db) {
     // `bun test` shares one module registry across test files; a previous
@@ -501,6 +631,12 @@ export function migrate(): void {
   // for signing) until the merchant rotates once. secret_hash is retained for
   // lifecycle/identity only and is no longer used to sign.
   ensureWebhookSecretEncryptionColumn(db);
+
+  // ── CCTP MASTER PHASE 2: cross-chain settlement schema (source/settlement
+  // decoupling + cross_chain_transfers). Runs after payment_intents exists so
+  // the ALTER ADD COLUMN and the transfer FK bind correctly. Purely additive
+  // and idempotent; existing same-chain intents and rows are untouched.
+  ensureCrossChainSchema(db);
 
   // ── MASTER PHASE C: reusable Payment Links (invoices). A payment_link is a
   // durable, merchant-owned intent TEMPLATE that mints concrete payment_intents

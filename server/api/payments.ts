@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { requireSession, requireSessionOrApiKey, type AuthedRequest } from '../middleware/auth.js';
 import { getDb } from '../db/schema.js';
+import { loadCrossChainStatus } from '../blockchain/cctp-status.js';
 
 const router = Router();
 
@@ -66,12 +67,18 @@ router.get('/:id', requireSessionOrApiKey, (req: Request, res: Response) => {
   // a payments row only exists after a successful on-chain verification + credit.
   const verification_state = 'verified';
 
+  // PHASE 13 (additive): cross-chain journey detail. Returns null (key omitted)
+  // for same-chain payments, since those have no cross_chain_transfers row — the
+  // existing response shape is therefore preserved for every legacy payment.
+  const crossChain = loadCrossChainStatus(payment.payment_intent_id as string);
+
   res.json({
     ...payment,
     blockchain_transaction: btx || null,
     verification_state,
     receipt,
     webhook_deliveries: webhooks,
+    ...(crossChain ? { cross_chain: crossChain } : {}),
   });
 });
 

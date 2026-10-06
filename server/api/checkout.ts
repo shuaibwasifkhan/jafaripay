@@ -7,14 +7,36 @@
 
 import { Router, type Request, type Response } from 'express';
 import { getDb } from '../db/schema.js';
+import { cctpSourceRoutePlan } from '../db/cctp.js';
+import { CCTP_FORWARD_HOOK_DATA, FORWARDING_FINALITY_STANDARD } from '../blockchain/cctp-forwarding-fee.js';
+import { describeCrossChainFees } from '../lib/fees.js';
 import { generateId } from '../lib/ids.js';
 import { verifyPayment, PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
+import { detectSourceBurn } from '../blockchain/cctp-source.js';
 import { enqueueWebhookDeliveries } from '../webhooks/delivery.js';
 import { formatBaseUnitsToDecimal } from '../lib/money.js';
 import { issueReceiptForPayment, generateReceiptForPayment, attemptReceiptEmail } from '../receipts/service.js';
 import { isValidEmail, normalizeEmail } from '../email/transport.js';
 
 const router = Router();
+
+// ── STEP 5N — CROSS-CHAIN SOURCE-BURN DETECTION (HTTP integration) ─────────
+// A cross-chain intent can NOT be verified with the same-chain verifyPayment()
+// path — its transaction is a CCTP DepositForBurn on the SOURCE chain and Arc
+// settlement happens asynchronously (attestation, then Circle forwarding for an
+// F>0 intent). We hand the submitted tx to the existing, unit-tested
+// detectSourceBurn(), the single production site that validates the burn against
+// the server-approved M + F / maxFee = F invariants, applies the source-finality
+// gate, and records the cross_chain_transfers row the reconciliation worker then
+// drives to settlement + merchant credit. The route duplicates NONE of that
+// worker logic — it only returns 'processing'. The module is read through a
+// restorable seam so this wiring is unit-testable without a live source chain
+// (mirrors the `spyOn` discipline the same-chain route tests already use).
+let detectSourceBurnImpl: typeof detectSourceBurn = detectSourceBurn;
+/** Test seam. Pass null to restore the real registry-backed detector. */
+export function setSourceBurnDetectionForTest(fn: typeof detectSourceBurn | null): void {
+  detectSourceBurnImpl = fn ?? detectSourceBurn;
+}
 
 // ── GET /checkout/:id ─────────────────────────────────────────────────────
 router.get('/:id', (req: Request, res: Response) => {
@@ -24,6 +46,8 @@ router.get('/:id', (req: Request, res: Response) => {
             pi.currency, pi.network, pi.chain_id, pi.usdc_address,
             pi.settlement_address, pi.expires_at, pi.created_at,
             pi.order_id, pi.description,
+            pi.is_cross_chain, pi.source_network, pi.settlement_network, pi.settlement_chain_id,
+            pi.forwarding_max_fee_base_units,
             m.name AS merchant_name
      FROM payment_intents pi
      JOIN merchants m ON m.id = pi.merchant_id
@@ -33,6 +57,51 @@ router.get('/:id', (req: Request, res: Response) => {
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
 
   // Don't expose private merchant fields
+  //
+  // CCTP PHASE 4: for a cross-chain intent, attach the SERVER-AUTHORITATIVE
+  // source-leg route plan. The checkout UI is forbidden from deriving any of
+  // these — it relays exactly what the registry pins, so a compromised/curious
+  // client can never move the mint recipient off the merchant's Arc wallet or
+  // retarget the destination domain/contract. Same-chain intents are unchanged.
+  if (pi.is_cross_chain === 1) {
+    const sourceSlug = String(pi.network);
+    const mintRecipient = String(pi.settlement_address);
+    const burnToken = String(pi.usdc_address);
+    const plan = cctpSourceRoutePlan({ sourceSlug, mintRecipientAddress: mintRecipient, burnTokenAddress: burnToken });
+    pi.cross_chain = true;
+
+    // STEP 5 — CIRCLE FORWARDING. F is the SERVER-approved fee persisted by
+    // applyForwardingQuote into payment_intents.forwarding_max_fee_base_units; a
+    // browser can NEVER set it (ownership proven in cctp-intents.test.ts). F > 0
+    // upgrades the otherwise-STANDARD route to a Forwarding route: the source must
+    // burn the GROSS M + F with the `cctp-forward` hook at STANDARD finality (>=
+    // 2000, matching our un-weakenable attestation gate) and Circle mints M on Arc.
+    // F = 0 keeps the EXACT pre-existing DIRECT plan (max_fee '0', finality 0, no
+    // hook) — forwarding is strictly additive and never forced on any payment.
+    const feeRaw = pi.forwarding_max_fee_base_units == null ? '0' : String(pi.forwarding_max_fee_base_units);
+    let fee = 0n;
+    try {
+      fee = BigInt(feeRaw);
+    } catch {
+      fee = 0n; // fail-safe to the DIRECT route; a garbage fee never enables forwarding
+    }
+    if (fee > 0n) {
+      plan.max_fee = fee.toString();                 // source burn carries maxFee = F
+      plan.min_finality_threshold = FORWARDING_FINALITY_STANDARD; // 2000 (Standard)
+      plan.hook_data = CCTP_FORWARD_HOOK_DATA;        // server-authored cctp-forward hook
+    }
+    pi.forwarding = fee > 0n;
+    pi.cctp_source_route = plan;
+    // PHASE 14: expose the fee model so the customer sees, before paying, that a
+    // Standard CCTP transfer is 1:1 — the merchant receives exactly this amount
+    // and JafariPay levies no hidden deduction on the transfer principal.
+    // For a Forwarding route the Circle fee F is passed through so the display
+    // reflects that Circle (not JafariPay) deducts it and the merchant still nets M.
+    pi.fees = describeCrossChainFees({ amountBaseUnits: String(pi.amount_base_units), feeBaseUnits: fee > 0n ? feeRaw : '0' });
+  } else {
+    pi.cross_chain = false;
+  }
+
   res.json(pi);
 });
 
@@ -63,7 +132,7 @@ router.post('/:id/verify', async (req: Request, res: Response) => {
     id: string; status: string; network: string; settlement_address: string;
     amount_base_units: string; usdc_address: string; chain_id: number;
     amount_decimal: string; environment: string; merchant_id: string;
-    expires_at: number;
+    expires_at: number; is_cross_chain: number;
   };
   const pi = db.prepare('SELECT * FROM payment_intents WHERE id = ?').get(req.params.id) as PiRow | null;
   if (!pi) { res.status(404).json({ error: 'Payment intent not found' }); return; }
@@ -87,6 +156,28 @@ router.post('/:id/verify', async (req: Request, res: Response) => {
   if (pi.status === 'succeeded') {
     const payment = db.prepare('SELECT * FROM payments WHERE payment_intent_id = ?').get(pi.id);
     res.json({ status: 'succeeded', payment }); return;
+  }
+
+  // ── CROSS-CHAIN (CCTP Forwarding) branch. NEVER runs the same-chain
+  // verifyPayment() money path. Delegates to the existing detectSourceBurn(),
+  // which owns the cross-chain state machine (payable gate, source-finality
+  // gate, M + F / maxFee = F burn validation, the cross_chain_transfers row and
+  // the intent→'processing' transition). The route just maps the result to HTTP
+  // and lets the reconciliation worker finish attestation → forwarding →
+  // destination verification → settlement → merchant credit.
+  if (pi.is_cross_chain === 1) {
+    const burn = await detectSourceBurnImpl({ paymentIntentId: pi.id, sourceTxHash: tx_hash });
+    if (burn.ok) {
+      res.json({ status: 'processing', transfer_id: burn.transferId, state: burn.state }); return;
+    }
+    if (burn.retryable) {
+      // Not mined yet / source block not final / transient RPC — the burn can
+      // still land, so keep the customer polling instead of failing hard.
+      res.json({ status: 'processing', message: burn.reason }); return;
+    }
+    // Hard rejection: this tx can never satisfy this intent (invalid/non-CCTP
+    // burn, amount ≠ M + F, wrong mint recipient, replay, non-payable intent, …).
+    res.status(422).json({ error: burn.reason, code: burn.code }); return;
   }
 
   // Expiry check — grace-aware. A genuinely settled payment landing shortly

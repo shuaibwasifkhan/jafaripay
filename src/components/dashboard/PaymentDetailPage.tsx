@@ -30,6 +30,23 @@ interface Payment {
     network: string;
     chain_id: number;
   } | null;
+  // PHASE 13: present only for cross-chain payments (omitted for same-chain).
+  cross_chain?: {
+    state: string;
+    status: string;
+    phase_label: string;
+    milestone_index: number;
+    total_milestones: number;
+    milestones: Array<{ key: string; label: string; done: boolean }>;
+    source_network: string;
+    source_tx_hash: string | null;
+    destination_network: string;
+    destination_tx_hash: string | null;
+    mint_recipient: string;
+    failure_reason: string | null;
+    is_succeeded: boolean;
+    is_failed: boolean;
+  } | null;
 }
 
 function CopyField({ value, label }: { value: string; label: string }) {
@@ -56,6 +73,39 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="text-xs font-medium text-slate-500 flex-shrink-0 w-36">{label}</span>
       <div className="flex-1 text-right">{children}</div>
     </div>
+  );
+}
+
+// PHASE 13: read-only CCTP cross-chain journey timeline. Renders ONLY when the
+// payment carries a cross_chain view (same-chain payments never reach this).
+function CrossChainJourney({ cc }: { cc: NonNullable<Payment['cross_chain']> }) {
+  const accent = cc.is_failed ? 'text-rose-600' : cc.is_succeeded ? 'text-forest-600' : 'text-amber-600';
+  return (
+    <Card className="p-5 mb-4">
+      <div className="flex items-center gap-2 mb-3">
+        <ShieldCheck size={13} className={accent} />
+        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Cross-chain settlement (Circle CCTP)</h2>
+      </div>
+      <p className={`text-sm font-medium mb-4 ${accent}`}>{cc.phase_label}</p>
+      <ol className="space-y-3">
+        {cc.milestones.map((m, i) => (
+          <li key={m.key} className="flex items-center gap-3">
+            <span className={`flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold ${m.done ? 'bg-forest-600 text-white' : 'bg-sand-200 text-slate-400'}`}>
+              {m.done ? '✓' : i + 1}
+            </span>
+            <span className={`text-xs ${m.done ? 'text-ink' : 'text-slate-400'}`}>{m.label}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-4 pt-3 border-t border-sand-200/70 space-y-1">
+        <Row label="Source"><span className="text-xs text-slate-600">{cc.source_network.replace(/_/g, ' ')}</span></Row>
+        {cc.source_tx_hash && <Row label="Source tx"><CopyField value={cc.source_tx_hash} label="Source tx" /></Row>}
+        <Row label="Destination"><span className="text-xs text-slate-600">{cc.destination_network.replace(/_/g, ' ')}</span></Row>
+        {cc.destination_tx_hash && <Row label="Destination tx"><CopyField value={cc.destination_tx_hash} label="Destination tx" /></Row>}
+        <Row label="Mint recipient"><CopyField value={cc.mint_recipient} label="Mint recipient" /></Row>
+        {cc.failure_reason && <Row label="Reason"><span className="text-xs text-rose-600">{cc.failure_reason}</span></Row>}
+      </div>
+    </Card>
   );
 }
 
@@ -125,6 +175,9 @@ export default function PaymentDetailPage() {
         <Row label="Expires"><span className="text-xs text-slate-500">{formatDate(payment.expires_at)}</span></Row>
         <Row label="Created"><span className="text-xs text-slate-500">{formatDate(payment.created_at)}</span></Row>
       </Card>
+
+      {/* PHASE 13: cross-chain journey (only when present) */}
+      {payment.cross_chain && <CrossChainJourney cc={payment.cross_chain} />}
 
       {/* Blockchain transaction */}
       {payment.blockchain_transaction ? (

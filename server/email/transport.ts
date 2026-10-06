@@ -16,6 +16,8 @@
  *    network and no secrets.
  */
 
+import { makeBrevoSmtpTransport } from './brevo-smtp.js';
+
 export interface EmailMessage {
   to: string;
   subject: string;
@@ -74,17 +76,26 @@ class NoopTransport implements EmailTransport {
 const noopTransport = new NoopTransport();
 
 // ── Selection ──────────────────────────────────────────────────────────────
-// A future real provider (SMTP/SES/Postmark/…) is added by implementing
-// EmailTransport and returning it here behind its env var — WITHOUT touching any
-// caller. Until then only 'dev' and 'none' exist, and NOTHING sends real email,
-// which is the safe default. We intentionally do not add an SMTP transport now:
-// that would require credentials/host config, which this phase must not add.
+// This switch is the ONE and ONLY transport-selection point. Adding a real
+// provider (Brevo SMTP, approved under D-4) means implementing EmailTransport
+// in a sibling file and returning it here behind its env var — WITHOUT
+// touching any caller. The pre-existing 'dev' and 'none' behaviours are
+// unchanged so every existing receipt test continues to work exactly as
+// before. An unknown EMAIL_TRANSPORT value still falls through to the safe
+// dev sink; a misconfigured Brevo never becomes a silent fake sender.
 export function getEmailTransport(): EmailTransport {
   switch ((process.env.EMAIL_TRANSPORT || 'dev').toLowerCase()) {
     case 'none':
       return noopTransport;
     case 'dev':
       return devTransport;
+    case 'brevo_smtp':
+      // D-4 approved provider (Brevo SMTP via smtp-relay.brevo.com:587 STARTTLS).
+      // The factory never throws; missing credentials surface later as `send()`
+      // returning `{ ok:false, error: 'brevo_smtp_missing_*' }`, which the
+      // receipts service records on the receipt row only, leaving the payment
+      // untouched. See `./brevo-smtp.ts` and docs/OPERATOR_RUNBOOK.md §8.
+      return makeBrevoSmtpTransport();
     default:
       // An unknown EMAIL_TRANSPORT value is treated as the safe dev sink rather
       // than silently pretending a real provider is wired up. Fail-safe, not

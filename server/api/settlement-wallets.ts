@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireSession, type AuthedRequest } from '../middleware/auth.js';
 import { getDb } from '../db/schema.js';
 import { generateId } from '../lib/ids.js';
+import { livePaymentsEnabled } from '../lib/production-config.js';
 import { getNetworkMeta, listEnabledNetworks } from '../blockchain/arc-provider.js';
 import { isAddress } from 'viem';
 
@@ -133,7 +134,7 @@ router.post('/', requireSession, (req: Request, res: Response) => {
   // Live-class gating is driven by the registry class, not by one Arc slug: no
   // mainnet-class settlement wallet can be registered while the deployment has
   // not enabled live payments. Testnet-class rows are unaffected.
-  if (envLabel === 'live' && !process.env.ENABLE_LIVE_PAYMENTS) { res.status(403).json({ error: 'Live mode not enabled. Set ENABLE_LIVE_PAYMENTS=true.' }); return; }
+  if (envLabel === 'live' && !livePaymentsEnabled()) { res.status(403).json({ error: 'Live mode not enabled. Set ENABLE_LIVE_PAYMENTS=true.' }); return; }
 
   const db = getDb();
   const id = generateId('sw');

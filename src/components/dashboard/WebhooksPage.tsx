@@ -27,7 +27,13 @@ interface Delivery {
   next_retry_at: number | null;
 }
 
-const EVENT_TYPES = ['payment.created', 'payment.processing', 'payment.succeeded', 'payment.failed', 'payment.expired'];
+// PHASE 12: the two cross-chain lifecycle events are subscribable alongside the
+// legacy set; the backend (webhooks.ts VALID_EVENTS + delivery.ts) already gates
+// and signs them through the identical, tenant/environment-scoped path.
+const EVENT_TYPES = [
+  'payment.created', 'payment.processing', 'payment.succeeded', 'payment.failed', 'payment.expired',
+  'payment.cross_chain.attestation_received', 'payment.cross_chain.failed',
+];
 
 export default function WebhooksPage() {
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([]);

@@ -5,7 +5,7 @@ import { generateId } from '../lib/ids.js';
 import { generateAndHashWebhookSecret } from '../webhooks/delivery.js';
 
 const router = Router();
-const VALID_EVENTS = ['payment.created','payment.succeeded','payment.failed','payment.expired','payment.processing'];
+const VALID_EVENTS = ['payment.created','payment.succeeded','payment.failed','payment.expired','payment.processing','payment.cross_chain.attestation_received','payment.cross_chain.failed'];
 
 function isPrivateUrl(url: string): boolean {
   try {

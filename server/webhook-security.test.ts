@@ -1,5 +1,5 @@
 /**
- * JafariPay — MASTER PHASE L: Webhook signing security test matrix (25 cases).
+ * JafariPay — MASTER PHASE L: Webhook signing security test matrix (26 cases).
  *
  * Covers the H-1 fix end to end:
  *   - deliveries are signed with the RAW merchant secret (recovered from an
@@ -483,4 +483,61 @@ test('W25: the plaintext secret never appears in logs during create, storage, or
   getDb().prepare("DELETE FROM payment_intents WHERE id='pi_ws25'").run();
   getDb().prepare("DELETE FROM settlement_wallets WHERE id='sw_pi_ws25'").run();
   await req('DELETE', `/webhook-endpoints/${created!.body.id}`, undefined, tokenA);
+});
+
+// ═══ Retry ladder + idempotent payload (Phase 21 webhook closure) ═══════════
+
+test('W26: the full retry ladder exhausts at exactly 8 attempts, then fails CLOSED; every attempt re-sends the identical event payload and a fresh verifiable signature', async () => {
+  const LADDER = [10, 30, 120, 300, 1800, 7200, 28800]; // must match delivery.ts RETRY_DELAYS_S
+  const MAX_ATTEMPTS = LADDER.length + 1;
+  const created = await createEndpointViaApi(tokenA);
+  const id = String(created.body.id);
+  const secret = String(created.body.secret);
+  try {
+    insertIntent('pi_ws26', 'merch_wsA');
+    insertDelivery('wd_ws26', id, 'pi_ws26', '{"id":"evt_ws26_ladder","type":"payment.succeeded"}');
+    mockFetch();
+    fetchStatus = 500; // the receiving endpoint stays down for the whole ladder
+    let firstBody = '';
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      fetchCalls = [];
+      await processPendingDeliveries();
+      expect(fetchCalls.length).toBe(1); // exactly one HTTP attempt per pass
+      const row = getDb()
+        .prepare('SELECT status,attempts,next_attempt_at FROM webhook_deliveries WHERE id=?')
+        .get('wd_ws26') as { status: string; attempts: number; next_attempt_at: number };
+      expect(row.attempts).toBe(attempt);
+      // Idempotency contract for the receiver: the EVENT payload is byte-identical
+      // across every retry — the stable event id (evt_...) is the dedupe key.
+      if (attempt === 1) firstBody = fetchCalls[0].body;
+      expect(fetchCalls[0].body).toBe(firstBody);
+      expect((JSON.parse(firstBody) as { id: string }).id).toBe('evt_ws26_ladder');
+      // Every attempt carries a FRESH, correctly signed header over the same body.
+      expect(verifyWebhookSignature(secret, fetchCalls[0].body, fetchCalls[0].headers['X-JafariPay-Signature'])).toBe(true);
+      if (attempt < MAX_ATTEMPTS) {
+        expect(row.status).toBe('pending');
+        // back-off lands on the documented ladder (±clock skew tolerance)
+        const delta = row.next_attempt_at - Math.floor(Date.now() / 1000);
+        expect(delta).toBeGreaterThanOrEqual(LADDER[attempt - 1] - 2);
+        expect(delta).toBeLessThanOrEqual(LADDER[attempt - 1] + 12);
+        // simulate the back-off elapsing so the next pass picks the row up again
+        getDb().prepare('UPDATE webhook_deliveries SET next_attempt_at=unixepoch()-60 WHERE id=?').run('wd_ws26');
+      } else {
+        // attempt 8 failed → terminal 'failed': never retried again, fail closed
+        expect(row.status).toBe('failed');
+      }
+    }
+    // A further worker pass must NOT resurrect the exhausted delivery.
+    fetchCalls = [];
+    await processPendingDeliveries();
+    expect(fetchCalls.length).toBe(0);
+    const final = getDb().prepare('SELECT status,attempts FROM webhook_deliveries WHERE id=?').get('wd_ws26') as { status: string; attempts: number };
+    expect(final.status).toBe('failed');
+    expect(final.attempts).toBe(MAX_ATTEMPTS);
+    getDb().prepare("DELETE FROM webhook_deliveries WHERE id='wd_ws26'").run();
+    getDb().prepare("DELETE FROM payment_intents WHERE id='pi_ws26'").run();
+    getDb().prepare("DELETE FROM settlement_wallets WHERE id='sw_pi_ws26'").run();
+  } finally {
+    await req('DELETE', `/webhook-endpoints/${id}`, undefined, tokenA);
+  }
 });

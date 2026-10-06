@@ -342,8 +342,9 @@ Reconciliation keeps intent status honest. It is an **automatic background worke
 1. **Expires** Payment Intents whose \`expires_at\` has passed *and* whose settlement grace buffer has elapsed — so a valid on-chain transfer that lands a few seconds late is still credited. Expired intents emit a \`payment.expired\` webhook.
 2. **Self-heals** intents stuck in \`processing\` for more than 5 minutes with no matching payment, returning them to \`requires_payment\` so they can still be paid.
 3. **Processes** pending webhook deliveries and pending receipt emails, each with its own retry/backoff.
+4. **Drives cross-chain journeys** (only when one exists): for an in-flight CCTP transfer it requests the Circle attestation, advances the state machine, and — once the destination Arc mint is confirmed on-chain — credits the merchant and emits the lifecycle webhook. This runs in a strictly isolated batched step, so a cross-chain failure can never affect the same-chain sweeps above.
 
-> The worker performs **no blockchain scanning**. On-chain verification happens only through the explicit verify path; reconciliation simply moves database state to match reality.
+> For **same-chain** payments the worker performs **no blockchain scanning** — on-chain verification happens only through the explicit verify path, and reconciliation simply moves database state to match reality. For **cross-chain** intents the worker does read Circle and the Arc destination, but only for transfers already recorded on-chain; it never credits before the Arc mint is confirmed.
 
 ### The ledger view
 
@@ -361,7 +362,7 @@ Because each \`tx_hash\` can be credited to at most one intent (a database uniqu
     title: 'Supported Networks',
     body: `## Supported Networks
 
-JafariPay accepts **native USDC** on **10 supported EVM mainnets**. One payment model — Payment Intents, hosted checkout, on-chain verification, signed webhooks, and direct merchant settlement — works the same way on every network. A payment is verified and settled **on the network it was made on**; JafariPay does not move funds between chains.
+JafariPay accepts **native USDC** on **10 supported EVM mainnets**. One payment model — Payment Intents, hosted checkout, on-chain verification, signed webhooks, and direct merchant settlement — works the same way on every network. By default a payment is verified and settled **on the network it was made on**; additionally, JafariPay offers **opt-in cross-chain settlement** that routes a supported source chain's USDC to the merchant's Arc wallet via Circle CCTP (see *Cross-chain settlement to Arc* below).
 
 | Network | Chain ID | Native USDC (6 decimals) | Explorer |
 |---|---|---|---|
@@ -382,9 +383,26 @@ Money is accepted **only** from the pinned native USDC contract per network. Bri
 
 The network is fixed per Payment Intent. \`allowed_networks\` on intent creation constrains the set; each network must be enabled and match the key's test/live class. Once created, the intent's \`network\` and \`chain_id\` can never change. The customer selects one supported network at checkout and the transfer is verified on that same network.
 
-### Multi-chain, not cross-chain
+### Same-chain by default
 
-This is multi-chain acceptance, not automatic cross-chain settlement. Paying USDC on Base settles to your settlement wallet on Base; paying on Arbitrum settles on Arbitrum. JafariPay never bridges or routes a payment from one chain to another.
+Each Payment Intent is settled on the network it was created for, directly to your settlement wallet on that network: paying USDC on Base settles to your Base wallet, paying on Arbitrum settles on Arbitrum, and an Arc→Arc payment is a plain same-chain transfer. This is the default for every network.
+
+### Cross-chain settlement to Arc (Circle CCTP, opt-in)
+
+JafariPay additionally supports **cross-chain settlement to Arc** using Circle **CCTP v2**. A customer pays native USDC on any CCTP-supported source chain and the amount is delivered, **1:1**, to the merchant's **one pinned Arc wallet** on Arc Mainnet — no manual bridging, and the merchant does **not** need a settlement wallet on each source chain.
+
+| Cross-chain source (pay here) | Settles to |
+|---|---|
+| Base, Arbitrum One, Polygon PoS, Avalanche C-Chain, OP Mainnet, Linea, Unichain | merchant's Arc Mainnet wallet (via Circle CCTP) |
+
+Key properties:
+
+- **Opt-in per intent.** Created with \`cross_chain: true\` plus a supported \`network\` (the source). All existing same-chain intents are unchanged.
+- **Non-custodial.** The CCTP mint recipient on Arc is always your pinned Arc wallet. JafariPay never holds private keys, never signs on your behalf, and is never the recipient of customer funds.
+- **Standard transfer, 1:1.** \`maxFee = 0\`, so the amount burned on the source equals the amount minted to your Arc wallet — no fee is deducted from the principal.
+- **Full lifecycle tracking.** The intent exposes a status timeline (source burn → source finality → Circle attestation → Arc mint → settled) and emits the \`payment.cross_chain.attestation_received\` and \`payment.cross_chain.failed\` webhooks. A cross-chain intent is credited **only** after the Arc-side mint is confirmed on-chain — never through the same-chain verify path.
+
+> **Not cross-chain:** **ZKsync Era** and **Celo** are supported for **same-chain USDC only**. They have no verified Circle CCTP route to Arc, so JafariPay never advertises or attempts a cross-chain settlement for them.
 
 ### Ethereum is not a payable network
 
@@ -481,6 +499,8 @@ Webhooks deliver signed event notifications to your server.
 | \`payment.succeeded\` | **Payment fully verified** |
 | \`payment.failed\` | Verification failed |
 | \`payment.expired\` | Intent expired without payment |
+| \`payment.cross_chain.attestation_received\` | Circle attested a cross-chain burn (destination mint pending) |
+| \`payment.cross_chain.failed\` | A cross-chain journey failed terminally (attestation timeout / verification / destination) |
 
 ### Event payload
 

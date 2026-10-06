@@ -1,12 +1,13 @@
 import { useEffect, useReducer, useCallback, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useAccount, useSwitchChain, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { useAccount, useSwitchChain, useWriteContract, useWaitForTransactionReceipt, useReadContract, usePublicClient } from 'wagmi';
 import { ConnectKitButton } from 'connectkit';
 import { erc20Abi } from 'viem';
-import { Zap, ExternalLink, Shield, CheckCircle, AlertCircle, Clock, Loader2, Receipt as ReceiptIcon } from 'lucide-react';
+import { Zap, ExternalLink, Shield, CheckCircle, AlertCircle, Clock, Loader2, Receipt as ReceiptIcon, ArrowLeftRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { USDC_DECIMALS } from '@/onchain-facts';
 import { resolveCheckoutNetwork, isWrongNetwork } from '@/checkout-network';
+import { buildCctpCheckoutPlan, tokenMessengerV2Abi, type CctpSourceRoute } from '@/cctp-checkout';
 import { Amount } from '@/onchain-money';
 import { formatAddress, formatUSDC } from '../../lib/format';
 
@@ -15,9 +16,13 @@ interface PaymentIntent {
   currency: string; network: string; chain_id: number; usdc_address: string;
   settlement_address: string; expires_at: number;
   merchant_name: string | null; order_id: string | null; description: string | null;
+  // CCTP PHASE 4 — server-authoritative cross-chain fields. Present only for a
+  // cross-chain intent; the client never derives the burn params itself.
+  cross_chain?: boolean;
+  cctp_source_route?: CctpSourceRoute;
 }
 
-type CheckoutStep = 'loading' | 'ready' | 'wallet-sign' | 'confirming' | 'verifying' | 'succeeded' | 'failed' | 'expired' | 'cancelled';
+type CheckoutStep = 'loading' | 'ready' | 'wallet-sign' | 'confirming' | 'verifying' | 'submitted' | 'succeeded' | 'failed' | 'expired' | 'cancelled';
 
 // Client-side mirror of the server's receipt-email guard. Purely advisory — the
 // server validates authoritatively and rejects a bad address BEFORE the money
@@ -40,6 +45,7 @@ type Action =
   | { type: 'TX_HASH'; hash: string }
   | { type: 'CONFIRMING' }
   | { type: 'VERIFYING'; hash: string }
+  | { type: 'SUBMITTED'; hash: string }
   | { type: 'SUCCEEDED'; receiptId?: string | null }
   | { type: 'FAILED'; error: string }
   | { type: 'EXPIRED' }
@@ -60,6 +66,7 @@ function reducer(s: State, a: Action): State {
     case 'TX_HASH':     return { ...s, txHash: a.hash, step: 'confirming' };
     case 'CONFIRMING':  return { ...s, step: 'confirming' };
     case 'VERIFYING':   return { ...s, txHash: a.hash, step: 'verifying' };
+    case 'SUBMITTED':   return { ...s, txHash: a.hash, step: 'submitted' };
     case 'SUCCEEDED':   return { ...s, step: 'succeeded', receiptId: a.receiptId ?? null };
     case 'FAILED':      return { ...s, step: 'failed', verifyError: a.error };
     case 'EXPIRED':     return { ...s, step: 'expired' };
@@ -154,8 +161,14 @@ export default function CheckoutPage() {
   const isWrongChain = isConnected && isWrongNetwork(walletChainId, chainId);
 
   // Write contract
-  const { writeContract, data: hash, isPending: isWalletPending, error: writeError } = useWriteContract();
+  const { writeContract, writeContractAsync, data: hash, isPending: isWalletPending, error: writeError } = useWriteContract();
   const { isSuccess: isOnchain } = useWaitForTransactionReceipt({ hash });
+  const publicClient = usePublicClient();
+
+  // True when this intent settles cross-chain (customer burns on the SOURCE and
+  // funds mint on Arc). Every same-chain effect/branch below is disabled for it
+  // so the ERC-20 auto-verify path can never run against a source burn.
+  const isCrossChainIntent = intent?.cross_chain === true;
 
   // Backend verification loop
   const verifyingRef = useRef(false);
@@ -200,21 +213,23 @@ export default function CheckoutPage() {
   // React to wagmi tx hash appearing — use ref to avoid re-running on step changes
   const prevHash = useRef<string | undefined>();
   useEffect(() => {
+    if (isCrossChainIntent) return; // cross-chain drives its own SUBMITTED step
     if (hash && hash !== prevHash.current) {
       prevHash.current = hash;
       dispatch({ type: 'TX_HASH', hash });
     }
-  }, [hash]);
+  }, [hash, isCrossChainIntent]);
 
   // React to onchain confirmation
   const prevOnchain = useRef(false);
   useEffect(() => {
+    if (isCrossChainIntent) return; // the same-chain verify pipeline must NOT run on a burn
     if (isOnchain && !prevOnchain.current && hash) {
       prevOnchain.current = true;
       dispatch({ type: 'VERIFYING', hash });
       void verifyPayment(hash);
     }
-  }, [isOnchain, hash, verifyPayment]);
+  }, [isOnchain, hash, verifyPayment, isCrossChainIntent]);
 
   // React to write error
   const prevWriteError = useRef<Error | null>(null);
@@ -233,6 +248,7 @@ export default function CheckoutPage() {
   const handlePay = () => {
     if (!intent || !view.isSupported || view.usdcAddress == null || chainId == null) return;
     if (!isConnected || isWrongChain || isExpired) return;
+    if (isCrossChainIntent) { void handlePayCrossChain(); return; }
     dispatch({ type: 'PAY' });
     writeContract({
       address: view.usdcAddress as `0x${string}`,
@@ -243,11 +259,74 @@ export default function CheckoutPage() {
     });
   };
 
+  // CCTP PHASE 4 — cross-chain source leg. Two sequential signatures, all params
+  // server-authoritative (buildCctpCheckoutPlan refuses if the GET omitted the
+  // route): (1) approve the source TokenMessenger, (2) depositForBurn to Arc
+  // (domain 26) minting to the merchant's pinned Arc wallet. After the burn
+  // lands we show a 'submitted' state — source-burn detection + Arc settlement
+  // are the server-side PHASE 5/8 responsibilities, never a same-chain verify.
+  const handlePayCrossChain = async () => {
+    if (!intent) return;
+    const plan = buildCctpCheckoutPlan(intent);
+    if (plan.status !== 'ready') {
+      const msg = plan.status === 'missing_route' || plan.status === 'invalid_route'
+        ? plan.error
+        : 'This payment is not configured for cross-chain.';
+      dispatch({ type: 'FAILED', error: msg });
+      return;
+    }
+    dispatch({ type: 'PAY' });
+    try {
+      const approveHash = await writeContractAsync({
+        address: plan.approve.to as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [plan.approve.spender as `0x${string}`, plan.approve.amount],
+        chainId: intent.chain_id,
+      });
+      if (publicClient) await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      // STEP 5 — Forwarding burns the GROSS M + F via depositForBurnWithHook so
+      // Circle's forwarder mints M on Arc; a DIRECT plan keeps the exact 7-arg
+      // depositForBurn. The plan is fail-closed (a Forwarding route without its
+      // server hook never reaches here), so `plan.forwarding` implies the WithHook
+      // entry is present. Every param stays server-authoritative.
+      let burnHash: `0x${string}`;
+      if (plan.forwarding && plan.depositForBurnWithHook) {
+        burnHash = await writeContractAsync({
+          address: plan.depositForBurnWithHook.to as `0x${string}`,
+          abi: tokenMessengerV2Abi,
+          functionName: 'depositForBurnWithHook',
+          args: plan.depositForBurnWithHook.args as unknown as [bigint, number, `0x${string}`, `0x${string}`, `0x${string}`, bigint, number, `0x${string}`],
+          chainId: intent.chain_id,
+        });
+      } else {
+        burnHash = await writeContractAsync({
+          address: plan.depositForBurn.to as `0x${string}`,
+          abi: tokenMessengerV2Abi,
+          functionName: 'depositForBurn',
+          args: plan.depositForBurn.args as unknown as [bigint, number, `0x${string}`, `0x${string}`, `0x${string}`, bigint, number],
+          chainId: intent.chain_id,
+        });
+      }
+      dispatch({ type: 'SUBMITTED', hash: burnHash });
+    } catch (e) {
+      const msg = (e as Error)?.message ?? '';
+      if (msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('denied')) {
+        dispatch({ type: 'LOADED', intent }); // reset to ready
+      } else {
+        dispatch({ type: 'FAILED', error: msg });
+      }
+    }
+  };
+
   const expirySecs = intent?.expires_at != null ? intent.expires_at - nowSec : null;
   const isExpired = expirySecs !== null && expirySecs <= 0;
   const networkName = view.displayName ?? 'Unavailable network';
   const explorerTx = txHash ? view.txExplorerUrl(txHash) : null;
-  const explorerSettlement = intent ? view.addressExplorerUrl(intent.settlement_address) : null;
+  // For a cross-chain intent the settlement address lives on ARC, not the
+  // displayed source chain, so an explorer link built from the source chain
+  // would point at the wrong network — suppress it (fail-safe, never mislink).
+  const explorerSettlement = intent && !intent.cross_chain ? view.addressExplorerUrl(intent.settlement_address) : null;
 
   return (
         <div className="min-h-dvh bg-cream flex items-center justify-center px-4 py-12">
@@ -354,6 +433,28 @@ export default function CheckoutPage() {
                     <a href={explorerTx} target="_blank" rel="noopener noreferrer"
                       className="flex items-center justify-center gap-1.5 text-xs text-forest-700 hover:text-forest-800 mt-2">
                       <ExternalLink size={11} /> View on explorer
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Cross-chain burn submitted (PHASE 4). The source burn is on its
+                way through Circle CCTP; Arc settlement is completed server-side
+                (PHASE 5/8). This is intentionally a distinct, non-'succeeded'
+                state so a customer never sees "complete" before funds mint on Arc. */}
+            {step === 'submitted' && (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="w-14 h-14 rounded-2xl bg-lilac-100 flex items-center justify-center">
+                  <ArrowLeftRight size={24} className="text-lilac-700" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-ink mb-1">Cross-chain transfer submitted</p>
+                  <p className="text-xs text-slate-500">Your USDC burn is confirmed on the source chain. Settlement to the merchant on Arc completes automatically after Circle attests the transfer — this can take a few minutes.</p>
+                  {txHash && explorerTx && (
+                    <a href={explorerTx} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-1.5 text-xs text-forest-700 hover:text-forest-800 mt-2">
+                      <ExternalLink size={11} /> View burn on explorer
                     </a>
                   )}
                 </div>

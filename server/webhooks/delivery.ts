@@ -10,7 +10,21 @@ import { encryptSecret, decryptSecret } from '../lib/crypto.js';
 const RETRY_DELAYS_S = [10, 30, 120, 300, 1800, 7200, 28800];
 const MAX_ATTEMPTS = RETRY_DELAYS_S.length + 1;
 
-export type WebhookEventType = 'payment.created' | 'payment.processing' | 'payment.succeeded' | 'payment.failed' | 'payment.expired';
+// CROSS-CHAIN (MASTER PHASE 12): two merchant-facing lifecycle events surface the
+// intermediate milestones of a CCTP journey that the legacy events cannot express.
+//   payment.cross_chain.attestation_received — the source burn is finalized and
+//     Circle has attested it; settlement on Arc is pending (progress signal).
+//   payment.cross_chain.failed — the journey reached a TERMINAL failure
+//     (attestation timeout / signature verification failure / destination mint
+//     never observed). Carries a machine reason + human detail. The intent itself
+//     still expires via payment.expired once the in-flight guard releases; this
+//     event gives the merchant the SPECIFIC cause at the moment it happens.
+// Final success remains the canonical payment.succeeded (emitted by the verified
+// destination-settlement credit), now ENRICHED with the cross-chain tx detail —
+// it is deliberately NOT duplicated by a second success event.
+export type WebhookEventType =
+  | 'payment.created' | 'payment.processing' | 'payment.succeeded' | 'payment.failed' | 'payment.expired'
+  | 'payment.cross_chain.attestation_received' | 'payment.cross_chain.failed';
 
 export function signWebhookPayload(secret: string, payload: string, timestamp: number): string {
   const sig = createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest('hex');
@@ -50,6 +64,25 @@ export function enqueueWebhookDeliveries(
     if (!subs.includes(eventType)) continue;
     db.prepare('INSERT INTO webhook_deliveries(id,webhook_endpoint_id,payment_intent_id,event_type,payload,status,attempts,next_attempt_at) VALUES(?,?,?,?,?,?,?,unixepoch())').run(generateId('del'), ep.id, paymentIntentId, eventType, payload, 'pending', 0);
   }
+}
+
+/**
+ * CROSS-CHAIN (MASTER PHASE 12): emit a merchant-facing cross-chain lifecycle
+ * webhook. The pipeline modules (PHASE 7 attestation, PHASE 11 worker) hold only
+ * the payment_intent_id, so this resolves the intent's own environment before
+ * delegating to the standard, tenant/environment-gated, subscription-filtered
+ * enqueue. Safe no-op when the intent is gone or has no subscribed active
+ * endpoint — the SAME guards that protect every other webhook delivery.
+ */
+export function emitCrossChainLifecycleWebhook(
+  paymentIntentId: string,
+  eventType: Extract<WebhookEventType, 'payment.cross_chain.attestation_received' | 'payment.cross_chain.failed'>,
+  data: Record<string, unknown>,
+): void {
+  const db = getDb();
+  const pi = db.prepare('SELECT environment FROM payment_intents WHERE id=?').get(paymentIntentId) as { environment: string } | undefined;
+  if (!pi) return;
+  enqueueWebhookDeliveries(paymentIntentId, eventType, data, pi.environment as 'test' | 'live');
 }
 
 export async function processPendingDeliveries(): Promise<void> {

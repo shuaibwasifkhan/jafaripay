@@ -3,6 +3,7 @@ import { createHmac } from 'crypto';
 import { requireSession, type AuthedRequest } from '../middleware/auth.js';
 import { getDb } from '../db/schema.js';
 import { generateId, generateApiKey } from '../lib/ids.js';
+import { livePaymentsEnabled } from '../lib/production-config.js';
 
 const router = Router();
 
@@ -39,7 +40,7 @@ router.post('/', requireSession, (req: Request, res: Response) => {
   const keyName = (name ?? label ?? '').trim();
   if (!keyName) { res.status(400).json({ error: 'name is required' }); return; }
   if (!['test','live'].includes(environment)) { res.status(400).json({ error: 'environment must be test or live' }); return; }
-  if (environment === 'live' && !process.env.ENABLE_LIVE_PAYMENTS) { res.status(403).json({ error: 'Live mode is not enabled' }); return; }
+  if (environment === 'live' && !livePaymentsEnabled()) { res.status(403).json({ error: 'Live mode is not enabled' }); return; }
   if (type !== undefined && !['public','secret'].includes(type)) { res.status(400).json({ error: 'type must be public or secret' }); return; }
 
   const db = getDb();

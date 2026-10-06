@@ -5,6 +5,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifySession } from '../auth/siwe.js';
 import { getDb } from '../db/schema.js';
+import { livePaymentsEnabled } from '../lib/production-config.js';
 import { createHmac } from 'crypto';
 
 export interface ApiKeyContext {
@@ -48,7 +49,7 @@ export function requireApiKey(opts?: { requireSecret?: boolean }) {
     if (opts?.requireSecret && !isSecret) {
       res.status(403).json({ error: 'This endpoint requires a secret key', code: 'auth.public_key_not_allowed' }); return;
     }
-    if (environment === 'live' && !process.env.ENABLE_LIVE_PAYMENTS) {
+    if (environment === 'live' && !livePaymentsEnabled()) {
       res.status(403).json({ error: 'Live payments are not enabled', code: 'auth.live_disabled' }); return;
     }
 
