@@ -44,6 +44,28 @@ export const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
   SUPPORTED_CHAINS.map((c) => c.id),
 );
 
+/**
+ * Chains that remain in the wagmi allowlist as pure capability metadata and
+ * MUST NEVER be reachable over the browser network. Ethereum (1) is the only
+ * member: the operator rule keeps it allow-listed for the ENS-resolution
+ * capability, but no checkout path may contact an Ethereum JSON-RPC — no app
+ * code consumes an ENS name today, wallet-UI libraries (ConnectKit) query
+ * chain-1 ENS decoratively at connect time, and CSP intentionally allow-lists
+ * no Ethereum RPC host. Without this marker, viem would resolve the un-pinned
+ * `http(undefined)` transport to the curated default
+ * https://ethereum.reth.rs/rpc (viem 2.56.5 mainnet metadata) and every
+ * browser ENS query would surface as a CSP violation during checkout.
+ * src/config.ts therefore binds these ids to an inert, zero-network transport
+ * (guarded by src/checkout-ethereum-rpc.test.ts).
+ *
+ * Wiring a REAL ENS operation later is a deliberate act: pin an explicit
+ * first-party RPC in CURATED_RPC_URLS, add the SAME host to
+ * server/lib/csp.ts, then remove the id from this set.
+ */
+export const ENS_ONLY_NO_BROWSER_RPC_CHAIN_IDS: ReadonlySet<number> = Object.freeze(
+  new Set([mainnet.id]),
+);
+
 export function isSupportedChainId(chainId: number): boolean {
   return SUPPORTED_CHAIN_IDS.has(chainId);
 }

@@ -458,7 +458,7 @@ Key properties:
 
 ### Ethereum is not a payable network
 
-Ethereum mainnet is used only for ENS resolution and is **not** offered as a payment network.
+Ethereum mainnet is allow-listed only as an ENS-resolution capability and is **not** offered as a payment network. Checkout never contacts an Ethereum RPC endpoint — no intent can target it and no browser request reaches it.
 
 ## Development / Testnets — NOT FOR PRODUCTION
 
