@@ -9,9 +9,11 @@
  *    idempotency) remain enforced during the grace window
  *
  * What is mocked: ONLY external blockchain I/O — `ArcProvider.getTransactionReceipt`
- * (the RPC fetch). The real `verifyPayment` rule pipeline (USDC Transfer decode,
- * exact recipient/amount match, duplicate/replay check, PI status/expiry check),
- * the real checkout route handler, and the real worker `tick()` all execute
+ * (the RPC fetch), plus the cross-chain sweeps' Circle/Iris + provider seams, which
+ * `tick()` would otherwise hit over the real network against rows shared suites left
+ * behind (see `CROSS_CHAIN_INERT` below). The real `verifyPayment` rule pipeline (USDC
+ * Transfer decode, exact recipient/amount match, duplicate/replay check, PI status/expiry
+ * check), the real checkout route handler, and the real worker `tick()` all execute
  * unmodified against an isolated temporary SQLite database.
  */
 import { test, expect, beforeAll, afterEach, afterAll, spyOn } from 'bun:test';
@@ -19,6 +21,9 @@ import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import express from 'express';
 import { encodeEventTopics, encodeAbiParameters, parseAbiItem } from 'viem';
+import type { DestinationProvider } from './blockchain/cctp-destination.ts';
+import type { FetchLike } from './blockchain/cctp-attestation.ts';
+import type { SourceBurnProvider } from './blockchain/cctp-source.ts';
 
 const TMP_DB = join(import.meta.dir, '..', 'data', `_expiry_test_${process.pid}.db`);
 process.env.DATABASE_URL = TMP_DB;
@@ -62,6 +67,32 @@ function makeReceipt(opts: { txHash: string; to?: string; value?: bigint; contra
 function mockReceipt(receipt: ReturnType<typeof makeReceipt> | null): void {
   spyOn(arc.ArcProvider.prototype, 'getTransactionReceipt').mockResolvedValue(receipt as never);
 }
+
+// `tick()` also runs the CROSS-CHAIN sweeps, which reach Circle Iris and an Arc RPC
+// unless their provider/fetch seams are injected. This suite has no cross-chain rows
+// of its own, but `bun test` binds ONE SQLite database per process, so rows left by
+// the cross-chain suites are visible here — and tests 5/6 call the real `tick()`. With
+// ~5 such rows that live I/O cost 3-5s and intermittently crossed bun's 5s test
+// timeout. Every external seam is injected exactly as the cross-chain worker suites
+// already do: each stub answers "nothing found", which resolves to a RETRYABLE outcome
+// (attestation pending / destination receipt missing / source receipt missing), so no
+// state advances, nothing credits or finalizes, and no request leaves the process.
+const inertIrisFetch: FetchLike = async () => ({ status: 404, ok: false, json: async () => ({}) });
+const inertDestProvider = (): DestinationProvider => ({ async getTransactionReceipt() { return null; } });
+const inertSourceProvider = (): SourceBurnProvider => ({
+  async getTransactionReceipt() { return null; },
+  async getLatestBlockNumber() { return 0n; },
+  async getHeadBlockNumber() { return 0n; },
+  // Never reached: the stub above stops at the null receipt, so no finality mode is
+  // consulted. Throwing keeps that true instead of inventing a config.
+  getConfig: () => { throw new Error('inert source stub: finality is never evaluated from this suite'); },
+  async ensureChainIdMatches() { /* inert */ },
+});
+const CROSS_CHAIN_INERT = {
+  fetchImpl: inertIrisFetch,
+  providerFactory: inertDestProvider,
+  sourceProviderFactory: inertSourceProvider,
+};
 
 let seq = 0;
 function seedPi(expiresInSec: number, status = 'requires_payment'): string {
@@ -151,14 +182,14 @@ test('4: invalid payment during grace -> not succeeded', async () => {
 // 5. worker does not expire during grace
 test('5: worker does NOT expire a PI within grace', async () => {
   const pi = seedPi(-60);
-  await tick();
+  await tick(CROSS_CHAIN_INERT);
   expect((getDb().prepare('SELECT status FROM payment_intents WHERE id=?').get(pi) as { status: string }).status).toBe('requires_payment');
 });
 
 // 6. worker expires after grace
 test('6: worker DOES expire a PI past grace', async () => {
   const pi = seedPi(-(GRACE + 120));
-  await tick();
+  await tick(CROSS_CHAIN_INERT);
   expect((getDb().prepare('SELECT status FROM payment_intents WHERE id=?').get(pi) as { status: string }).status).toBe('expired');
   const events = getDb().prepare('SELECT event_type FROM payment_events WHERE payment_intent_id=?').all(pi) as { event_type: string }[];
   expect(events.map(e => e.event_type)).toContain('payment.expired');
