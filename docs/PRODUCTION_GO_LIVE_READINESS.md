@@ -3,6 +3,8 @@
 Status: **DOCUMENT ONLY — NO CODE CHANGES, NO ACTIVATION, NO TRANSACTIONS.**
 Date: 2026-10-01 — **Phase 21C closure update appended 2026-10-06** (see §0; all
 prior statements about CCTP Forwarding being unimplemented/unexercised are SUPERSEDED).
+**Real-mainnet UAT close-out appended 2026-10-07** (see §0A — PRODUCTION CCTP FORWARDING
+E2E — PASS; it supersedes the "never executed on mainnet" framing in §11).
 Purpose: A precise, evidence-based operational readiness pack for the human/infrastructure
 team performing the Phase 21 go-live. Every claim cites a repository file.
 
@@ -74,14 +76,87 @@ is now strictly `=== 'true'` (previously ANY non-empty string — including `fal
 
 ---
 
+## 0A. PRODUCTION CCTP FORWARDING E2E — PASS (2026-10-07) — REAL MAINNET EVIDENCE
+
+> **PRODUCTION CCTP FORWARDING E2E — PASS**, recorded 2026-10-07. Base **Mainnet** →
+> Arc **Mainnet**, real USDC, Circle **production** attestation, Circle's production
+> forwarder executing the destination leg. This is the first real-money execution of the
+> §11 "Cross-Chain CCTP Payment" procedure.
+>
+> **Evidence tier — do not confuse the three:** §0's `pi_s3djmmlvuac03cvusbaoznwh` block is
+> historical **Base Sepolia → Arc Testnet / Circle sandbox** evidence and is unchanged,
+> read-only. Unit/integration suites are **development** evidence. **This §0A block is the
+> only REAL PRODUCTION money evidence in the repository.**
+
+| Field | Value |
+|-------|-------|
+| Verdict | **PASS** (2026-10-07) |
+| payment_intent | `pi_x39anzavxvj60ojq0gyseqpz` |
+| cross_chain_transfer | `cct_uq64gsr4kgahtkfd8v0pe1uf` |
+| Source network | `base_mainnet` — chain 8453, native USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| Settlement network | `arc_mainnet` — chain 5042 |
+| Merchant net credited (M) | **1.000000 USDC** (1,000,000 base units — exactly M, not M+F) |
+| Forwarding fee (F = `max_fee`) | 0.016011 USDC (16,011 base units; server-authored Circle quote, never client-chosen) |
+| Gross source burn (M+F) | 1.016011 USDC (1,016,011 base units) |
+| Source tx | `0x353ad0e014ea9506404b52c2001b032b00d5693a38053a303cf90e3395f22b42` |
+| Destination tx | `0x54a528648f77f7e0210bdd2bb34f74c43767935b1c404ac510fce4b1b8f2e134` |
+| `destination_domain` / `min_finality_threshold` / `destination_caller` | 26 / 2000 (Standard) / `bytes32(0)` |
+| Transfer state path | `source_finalizing → source_finalized → attestation_pending → settled` |
+| Final `attestation_status` / `claim_status` / state | `complete` / `confirmed` / `settled` |
+| payment | `pay_845ktggmrz49cpig26fkdqad` — `succeeded`, 1.000000, `arc_mainnet` / 5042 |
+| receipt | `rcpt_y42kg3b70s43fh2pn85souen` — 1.000000 USDC, `payment_status=succeeded` |
+| `email_status` | `sent` (`emailed_at` populated) |
+
+**Authoritative source-tx outcome.** The wallet UI (MetaMask) first reported
+"Interaction failed" for the `depositForBurn` submission. The Base receipt fetched
+afterwards is authoritative: `status=0x1` (**SUCCESS**) and
+`to=0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d` — exactly the mainnet
+`TokenMessengerV2` pinned in `server/db/cctp.ts`. **This UAT is NOT a failed source
+transaction**, and nothing was re-signed or replayed to obtain that receipt.
+
+**Server-side completion — the browser was not required.** The journey reached `settled`
+with the customer's browser no longer participating: source finality, attestation and
+destination settlement were all driven by the reconciliation worker. That is precisely the
+Phase 21F (checkout hands the journey to the worker) + Phase 21G (worker recovers/drives
+source finality) behaviour, committed as `0544966`
+(`feat(cross-chain): complete the CCTP journey server-side after the source burn`), with
+`server/cctp21f-checkout-bridge.test.ts` and `server/cctp21g-source-finality.test.ts` as the
+regression coverage.
+
+**Verification basis — stated honestly.** Every value above was read from JafariPay's own
+production SQLite rows plus receipt/attestation data the application verified over RPC: the
+Base source receipt, Circle's production attestation (money gates: `amount == M+F`,
+`maxFee == F`, `finalityThresholdExecuted >= 2000`, `feeExecuted == F`), and the Arc mint
+receipt re-checked by `verifyDestinationMint` **before** the merchant credit. The destination
+hash was recorded from Circle's `forwardTxHash` on the attestation
+(`server/blockchain/cctp-attestation.ts`) — proof that Circle's forwarder broadcast the
+destination leg. **No independent block-explorer confirmation was captured for this
+close-out, and none is claimed here.**
+
+**What this evidence newly closes:** Circle **mainnet** Forwarding entitlement for
+Base Mainnet → Arc Mainnet (domain 6 → 26) is no longer inferred from testnet — the
+production forwarder actually executed the destination leg. **What it still does NOT close:**
+the D-1 **written** sign-off by the accountable owner (§6, Runbook §2), and external merchant
+webhook delivery to a live endpoint — **no webhook-delivery evidence was captured for this
+UAT**, so external delivery remains unexercised by recorded evidence (the same caveat as §0;
+the internal event/outbox path is covered by the Phase L W1–W26 matrix).
+
+**Secrets / PII:** this section intentionally records no API keys, no SMTP credentials, no
+`.env` contents and no signer keys. The receipt's `customer_email` value is deliberately not
+reproduced here — only its delivery status (`sent`) is recorded.
+
+---
+
 ## 1. Executive Status
 
 JafariPay's engineering scope (Phases 0–20 + CCTP Forwarding closure) is **fully
 verified** at code level:
-- 711 automated tests, 0 failures, typecheck clean
+- 759 automated tests, 0 failures, typecheck clean (711 at the Phase 21C closure counted in §0)
 - Real CCTP V2 testnet E2E (Phase 16): Base Sepolia → Arc Testnet mint confirmed
 - **Real CCTP Forwarding application E2E (Phase 21C): full intent→settlement flow
   with Circle's forwarder executing the destination leg — see §0**
+- **REAL PRODUCTION CCTP Forwarding E2E (2026-10-07): Base Mainnet → Arc Mainnet,
+  1 USDC, completed server-side after the burn without the browser — see §0A**
 - Same-chain, cross-chain, and inventory integrity gates (Phases 17–20) all pass
 - Live read-only validation (Phase 20): 13/13 enabled EVM networks PASS
 - No secrets or private keys in the repository
@@ -97,14 +172,14 @@ The system is **READY FOR OPERATIONAL PROVISIONING** — not yet production-live
 |-------|--------|----------|
 | Money gate (verifyPayment) | VERIFIED | 13 per-network matrix tests + 4 same-chain gates |
 | CCTP V2 cross-chain pipeline | VERIFIED | Phases 5–15 tests (attestation, destination, state machine, worker) |
-| CCTP **Forwarding** (fee quote, hook, attestation, settlement) | **VERIFIED — see §0** | `server/blockchain/cctp-forwarding-fee.ts`, `cctp-forwarding-attestation-5nfix.test.ts`, `cctp-forwarding-fee.test.ts`, live Base Sepolia → Arc Testnet application E2E |
+| CCTP **Forwarding** (fee quote, hook, attestation, settlement) | **VERIFIED — see §0 + §0A** | `server/blockchain/cctp-forwarding-fee.ts`, `cctp-forwarding-attestation-5nfix.test.ts`, `cctp-forwarding-fee.test.ts`, live Base Sepolia → Arc Testnet application E2E, **live Base Mainnet → Arc Mainnet production UAT (§0A)** |
 | Cross-chain isolation (no chain confusion) | VERIFIED | Phase 18: 3/3 pairwise + replay tests |
 | Registry completeness (no silent omission) | VERIFIED | Phase 19: 5/5 inventory gates |
 | Live network identity validation | VERIFIED | Phase 20: 13/13 PASS |
 | Real testnet E2E settlement | VERIFIED | Phase 16: TX `0xca4436a1…` on Arc Testnet |
 | Webhook signing + at-rest encryption | VERIFIED | Phase L + security tests |
 | Email delivery | VERIFIED | `EmailTransport` interface + `dev`/`none`/`brevo_smtp` transports + retry contract. D-4 IMPLEMENTED (Brevo SMTP). Live SMTP submission + inbox delivery independently verified. |
-| Frontend SDK + checkout | VERIFIED | Build clean, 711 tests |
+| Frontend SDK + checkout | VERIFIED | Build clean, 759 tests |
 
 ---
 
@@ -117,7 +192,7 @@ The system is **READY FOR OPERATIONAL PROVISIONING** — not yet production-live
 | 18 | Cross-chain pairwise isolation (3 gates) | 3/3 PASS |
 | 19 | Inventory completeness (5 gates) | 5/5 PASS |
 | 20 | Live RPC read-only validation (13 networks) | 13/13 PASS, 0 MISMATCH |
-| All | Full test suite | 711 pass / 0 fail / 4785 expect() (Phase 21C closure count; was 622/4301 at first writing) |
+| All | Full test suite | 759 pass / 0 fail / 5084 expect() / 47 files (2026-10-07 production close-out; 711/4785/41 at Phase 21C closure; 622/4301 at first writing) |
 | All | Typecheck (tsc --noEmit) | EXIT=0 |
 
 ---
@@ -473,7 +548,11 @@ half-wired Brevo credentials; `RPC_PROXY_BASE_URL` set without `RPC_PROXY_TOKEN`
 
 ## 11. Mainnet Smoke-Test Procedure
 
-> **NOT EXECUTED HERE.** This is the procedure an operator follows after all go-live gates
+> **STATUS (2026-10-07):** the **Cross-Chain CCTP Payment** procedure below HAS now been
+> executed once against real mainnet funds and PASSED — see **§0A** (Base Mainnet →
+> Arc Mainnet, 1 USDC, server-side completion). The **same-chain Arc Mainnet** payment
+> procedure and the external-merchant-webhook leg have **NOT** been executed.
+> This section remains the procedure an operator follows after all go-live gates
 > are satisfied. All amounts are minimal (1 USDC).
 
 ### Pre-flight (READ-ONLY, NO FUNDS)
@@ -503,7 +582,7 @@ half-wired Brevo credentials; `RPC_PROXY_BASE_URL` set without `RPC_PROXY_TOKEN`
 4. Confirm: payment intent → `succeeded`, receipt issued, webhook delivered
 5. Evidence: destination tx hash, explorer link, webhook delivery log
 
-### Cross-Chain CCTP Payment (minimal: 1 USDC)
+### Cross-Chain CCTP Payment (minimal: 1 USDC) — **EXECUTED ON PRODUCTION 2026-10-07: PASS (§0A)**
 
 1. Create a cross-chain intent (source: Base Mainnet, destination: Arc Mainnet)
 2. Customer calls `approve` + `depositForBurn` on Base Mainnet TokenMessengerV2
@@ -545,7 +624,7 @@ half-wired Brevo credentials; `RPC_PROXY_BASE_URL` set without `RPC_PROXY_TOKEN`
 Before any production deployment, re-verify:
 
 ```bash
-bun test              # 711 pass / 0 fail / 4785 expect() / 41 files (Phase 21C closure)
+bun test              # 759 pass / 0 fail / 5084 expect() / 47 files (2026-10-07 close-out; 711/4785/41 at Phase 21C closure)
 bun run typecheck     # EXIT=0
 bun run build         # vite build + SDK bundle clean
 bun audit             # no known vulnerabilities in prod deps (record exact output)
@@ -559,13 +638,21 @@ Phase-specific regression:
 - Phase 19: same file (P19 5/5)
 - Phase 20: the live validator itself
 
+Suite hermeticity (2026-10-07 close-out): every cross-chain-aware test call site of the
+reconciliation worker (`tick()` / `tickCrossChain()`) injects the inert
+`fetchImpl` / `providerFactory` / `sourceProviderFactory` seams, so `bun test` issues **no live
+Circle/Arc RPC** regardless of which temporary SQLite database the process binds. `bun test`
+shares one module registry (and therefore one DB) across files, so a single un-injected `tick()`
+can read another suite's rows over the real network and time out — keep the seams injected in any
+new worker test.
+
 ---
 
 ## 14. Human / Business Decisions Required
 
 | # | Decision | Current State | Impact |
 |---|----------|---------------|--------|
-| 1 | **CCTP executor model** (§6) | Evidence supports **Option C — Circle Forwarding** (implemented + testnet-verified §0); **written owner sign-off PENDING** + Circle mainnet entitlement confirmation | Determines operational architecture, cost, liability |
+| 1 | **CCTP executor model** (§6) | Evidence supports **Option C — Circle Forwarding** (implemented + testnet-verified §0; **real-mainnet production UAT PASS §0A**); **written owner sign-off PENDING**. Circle mainnet Forwarding entitlement for Base→Arc is no longer an assumption — §0A shows the production forwarder executing the destination leg | Determines operational architecture, cost, liability |
 | 2 | **Which VERIFIED_NOT_ENABLED networks to enable** | 12 held | Each needs go/no-go decision |
 | 3 | **Ethereum mainnet: keep ENS-only or make payable?** | Operator chose: ENS-only | Reversal requires registry change |
 | 4 | **Email provider selection** | **DECIDED + IMPLEMENTED: Brevo via `smtp-relay.brevo.com:587` (STARTTLS)** — project-owner approved; live SMTP delivery test PASSED | Production credential injection + outbound 587 verification from the hosting environment remain |
@@ -590,7 +677,7 @@ Phase-specific regression:
 | 8 | Fund executor wallet with ARCY gas (if Option A) | Treasury | #7 |
 | 9 | Deploy with production env (`ENABLE_LIVE_PAYMENTS=true`) | DevOps | All above |
 | 10 | Run Phase 20 validator against production RPCs | QA | #3 |
-| 11 | Execute smoke-test procedure (§11) | QA | #9, #10 |
+| 11 | Execute smoke-test procedure (§11) — cross-chain leg DONE 2026-10-07 (§0A); same-chain Arc Mainnet leg still pending | QA | #9, #10 |
 | 12 | Set up monitoring / alerting | SRE | #9 |
 
 ---
@@ -600,8 +687,8 @@ Phase-specific regression:
 Phase 21 (operational go-live) may begin when:
 
 - [x] All code-level phases (0–20 + CCTP Forwarding closure) verified
-- [x] 711 tests pass, typecheck clean, build clean, lint clean
-- [x] Real application CCTP Forwarding E2E PASS (§0)
+- [x] 759 tests pass, typecheck clean, build clean, lint clean (2026-10-07 production close-out; 711 when this entry criterion was first checked at Phase 21C)
+- [x] Real application CCTP Forwarding E2E PASS (§0 testnet/sandbox; §0A **real mainnet production UAT**)
 - [x] Production boot fail-closed config validation implemented (`server/lib/production-config.ts`)
 - [x] Phase 20 live validation passes against current (public) RPCs — re-run below
       AFTER production RPCs are configured, before declaring this gate met

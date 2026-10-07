@@ -428,7 +428,7 @@ Every checkbox requires attached evidence. No checkbox may be marked complete wi
 [ ] On-call rotation established and paging tested
 [ ] Rollback procedure rehearsed at least once in staging
 [ ] Final regression green:
-    [ ] bun test → 711 pass / 0 fail
+    [ ] bun test → 0 fail (759 pass / 5084 expect() / 47 files at the 2026-10-07 production close-out; see Section 12)
     [ ] bun run typecheck → EXIT = 0
     [ ] bun run build → PASS
     [ ] Phase 17 gate — PASS
@@ -451,13 +451,15 @@ bun run typecheck
 bun run build
 ```
 
-Expected output:
+Expected output (recorded at the 2026-10-07 production close-out; the pass count grows as
+suites are added — **0 fail is the gate**, and a *lower* count than this means the wrong
+database/suite set ran or files are missing):
 
 ```
-711 pass
+759 pass
 0 fail
-4785 expect() calls
-Ran 711 tests across 41 files.
+5084 expect() calls
+Ran 759 tests across 47 files.
 ```
 
 ```
@@ -482,7 +484,12 @@ If any regression fails, stop go-live. Investigate and resolve before proceeding
 
 ---
 
-## Section 13 — Controlled Smoke Test (DOCUMENTED, NOT EXECUTED)
+## Section 13 — Controlled Smoke Test (13.B CROSS-CHAIN: EXECUTED ON PRODUCTION 2026-10-07 — PASS; 13.A SAME-CHAIN: DOCUMENTED, NOT EXECUTED)
+
+> The executed 13.B evidence (Base Mainnet → Arc Mainnet, 1 USDC, real Circle production
+> attestation + Circle's production forwarder) is recorded in
+> `docs/PRODUCTION_GO_LIVE_READINESS.md` **§0A**. This section stays the procedure an
+> operator follows; it is not duplicated here to avoid two drifting copies of the evidence.
 
 The smoke test is performed **only after** every Section 11 checkbox is green **and** the accountable owner has signed off go-live authorization.
 
@@ -513,7 +520,7 @@ Two smoke tests are defined:
 - **Merchant credit:** after the Arc `Transfer` event from the pinned native USDC contract confirms the mint to the merchant's pinned address, worker settles the intent.
 - **Webhook:** merchant receives `payment.cross_chain.attestation_received` and later `payment.succeeded` (or `payment.cross_chain.failed` if attestation times out).
 - **Receipt:** same as 13.A.
-- **Reconciliation:** cross-chain journey recorded in `cctp_journeys` and reconciled against the observed Arc event.
+- **Reconciliation:** cross-chain journey recorded in `cross_chain_transfers` and reconciled against the observed Arc event.
 - **Evidence:** source tx hash, attestation id, destination tx hash, Arc block number, webhook logs, DB snapshots.
 - **Rollback / incident:** if the attestation cannot be obtained within the 30-minute window, the journey transitions to `cross_chain.attestation_failed` and the customer is notified per policy (decision D-5). If the destination broadcast fails per the chosen executor model, escalate per Section 16.
 
@@ -541,7 +548,7 @@ The operator retains the following **after every production-touching step** (dep
 
 **Regression evidence:**
 
-- `bun test` full output (711 pass / 0 fail).
+- `bun test` full output (0 fail; 759 pass / 47 files at the 2026-10-07 close-out).
 - `bun run typecheck` result (EXIT = 0).
 - `bun run build` result.
 - `scripts/phase20-live-validate.ts` full output (13/13 PASS).
@@ -743,10 +750,10 @@ DevOps / SRE provisions and hands off:
 
 Engineering has already delivered and verified:
 
-- Phases 0–20 complete + Phase 21C CCTP Forwarding closure (see `docs/PRODUCTION_GO_LIVE_READINESS.md` §0 and Section 1 of this runbook).
-- 711 tests / 0 fails / typecheck EXIT=0 / build PASS / lint clean.
+- Phases 0–20 complete + Phase 21C CCTP Forwarding closure + Phases 21F/21G server-side journey completion (see `docs/PRODUCTION_GO_LIVE_READINESS.md` §0, §0A and Section 1 of this runbook).
+- 759 tests / 0 fails / typecheck EXIT=0 / build PASS / lint clean (2026-10-07 production close-out).
 - Phase 20 13/13 read-only live validation against the current curated RPCs.
-- CCTP V2 architecture (executor-agnostic by design) + **Circle Forwarding (Option C) implemented and live testnet-verified**.
+- CCTP V2 architecture (executor-agnostic by design) + **Circle Forwarding (Option C) implemented, live testnet-verified, and now REAL-MAINNET-VERIFIED (Base Mainnet → Arc Mainnet — readiness pack §0A)**.
 - Registry, schema, migration, self-healing seed, chain-id guard, webhook signing, at-rest encryption, email transport abstraction, worker reconciliation, production boot config validator — all in place and tested.
 - Product documentation + WebApp copy aligned with the verified implementation.
 
