@@ -35,6 +35,7 @@ import type { DestinationProvider } from './blockchain/cctp-destination.ts';
 import type { FetchLike } from './blockchain/cctp-attestation.ts';
 import { addressToBytes32 } from './db/cctp.ts';
 import { messageTransmitterFor } from './blockchain/cctp-source.ts';
+import type { SourceBurnProvider } from './blockchain/cctp-source.ts';
 import type { RawLog, TransactionReceipt } from './blockchain/arc-provider.ts';
 
 const ARC_WALLET = '0x3af65566013269a1c2f6ee97d49f93a98d51d220';
@@ -127,6 +128,20 @@ function providerMintingFor(txHash: string): (dest: string) => DestinationProvid
   return () => ({ async getTransactionReceipt(h) { return h === txHash ? mintReceipt(h, ARC_WALLET) : null; } });
 }
 const providerNull = (): DestinationProvider => ({ async getTransactionReceipt() { return null; } });
+// PHASE 21G: NOW is a FUTURE epoch, so this suite's clock makes every OTHER
+// suite's real-timestamped `source_finalizing` row look due. Injecting a source
+// provider that answers "no receipt" keeps the new recovery sweep hermetic: it
+// resolves to a retryable 'receipt_missing', so state is never advanced and no
+// live Base-Sepolia RPC is issued from the test process.
+const sourceProviderNull = (): SourceBurnProvider => ({
+  async getTransactionReceipt() { return null; },
+  async getLatestBlockNumber() { return 0n; },
+  async getHeadBlockNumber() { return 0n; },
+  // Never reached: this mover stops at the null receipt, so no finality mode is
+  // ever consulted here. Throwing keeps that true rather than pretending a config.
+  getConfig: () => { throw new Error('21G inert source stub: finality is never evaluated'); },
+  async ensureChainIdMatches() { /* inert */ },
+});
 
 beforeAll(() => {
   migrate();
@@ -168,7 +183,7 @@ test('W2: the attestation sweep advances a due, finalized transfer (poll → pen
   seedCct(tid, iid, { state: 'source_finalized', attestationStatus: 'none', finalized: NOW - 60, next: null, updatedAt: NOW });
   const { fetch, calls } = pendingFetch();
   const before = calls.n;
-  const stats = await tickCrossChain({ fetchImpl: fetch, providerFactory: providerNull, nowSeconds: NOW });
+  const stats = await tickCrossChain({ fetchImpl: fetch, providerFactory: providerNull, sourceProviderFactory: sourceProviderNull, nowSeconds: NOW });
   expect(calls.n).toBeGreaterThan(before);           // the due row WAS polled
   expect(cct(tid).state).toBe('attestation_pending');
   expect(Number(cct(tid).attestation_attempts)).toBe(1);
@@ -181,7 +196,7 @@ test('W3: a not-due transfer is left untouched by the sweep (back-off survives a
   const tid = `cct_cctpw_nd_${seq}`;
   seedCct(tid, iid, { state: 'attestation_pending', attestationStatus: 'pending', finalized: NOW - 60, next: NOW + 500, attempts: 3, updatedAt: NOW });
   const { fetch } = pendingFetch();
-  await tickCrossChain({ fetchImpl: fetch, providerFactory: providerNull, nowSeconds: NOW });
+  await tickCrossChain({ fetchImpl: fetch, providerFactory: providerNull, sourceProviderFactory: sourceProviderNull, nowSeconds: NOW });
   expect(cct(tid).attestation_attempts).toBe(3);      // not polled
   expect(cct(tid).state).toBe('attestation_pending'); // unchanged
 });
@@ -207,7 +222,7 @@ test('W4: recordDestinationClaim attaches the mint tx WITHOUT crediting (guarded
   expect(r2.ok && r2.outcome).toBe('already_recorded');
 
   // Now the sweep settles it, crediting ONLY because the provider proves the mint.
-  const stats = await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerMintingFor(tx), nowSeconds: NOW });
+  const stats = await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerMintingFor(tx), sourceProviderFactory: sourceProviderNull, nowSeconds: NOW });
   expect(stats.settled).toBeGreaterThanOrEqual(1);
   expect(payCount(iid)).toBe(1);
   expect(cct(tid).state).toBe('settled');
@@ -219,7 +234,7 @@ test('W5: a recorded hash with NO matching on-Arc mint never credits', async () 
   const tid = `cct_cctpw_nm_${seq}`;
   const tx = destHash(7000 + seq);
   seedCct(tid, iid, { state: 'destination_submitted', attestationStatus: 'complete', destTx: tx, updatedAt: NOW });
-  const stats = await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerNull, nowSeconds: NOW });
+  const stats = await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerNull, sourceProviderFactory: sourceProviderNull, nowSeconds: NOW });
   expect(stats.settled).toBe(0);
   expect(payCount(iid)).toBe(0);                      // attested+recorded but no mint ⇒ NO credit
   expect(cct(tid).state).toBe('destination_submitted');
@@ -252,7 +267,7 @@ test('W7: an attested transfer that never gets a mint is parked destination_fail
   const tid = `cct_cctpw_to_${seq}`;
   // updated_at far in the past (older than the destination-timeout window), no dest tx.
   seedCct(tid, iid, { state: 'attested', attestationStatus: 'complete', destTx: null, updatedAt: NOW - 60 * 60 - 10 });
-  const stats = await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerNull, nowSeconds: NOW });
+  const stats = await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerNull, sourceProviderFactory: sourceProviderNull, nowSeconds: NOW });
   expect(cct(tid).state).toBe('destination_failed');
   expect(String(cct(tid).failure_reason)).toContain('destination');
   expect(hasEvent(iid, 'payment.cross_chain.destination_failed')).toBe(true);
@@ -263,6 +278,6 @@ test('W8: a recently-attested transfer is NOT timed out (window not elapsed)', a
   const iid = `pi_cctpw_${s()}`; insertIntent(iid, { status: 'processing', expires: NOW + 9999, crossChain: true });
   const tid = `cct_cctpw_recent_${seq}`;
   seedCct(tid, iid, { state: 'attested', attestationStatus: 'complete', destTx: null, updatedAt: NOW - 10 });
-  await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerNull, nowSeconds: NOW });
+  await tickCrossChain({ fetchImpl: pendingFetch().fetch, providerFactory: providerNull, sourceProviderFactory: sourceProviderNull, nowSeconds: NOW });
   expect(cct(tid).state).toBe('attested');            // still within the window
 });

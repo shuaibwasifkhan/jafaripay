@@ -43,6 +43,7 @@
 import { decodeEventLog, fromHex, keccak256, parseAbiItem, type AbiEvent } from 'viem';
 import { getDb } from '../db/schema.js';
 import { generateId } from '../lib/ids.js';
+import { advanceTransferState } from './cctp-state.js';
 import { ArcProvider, getNetworkConfig, getNetworkMeta, type NetworkConfig, type TransactionReceipt } from './arc-provider.js';
 import {
   ARC_CCTP_DOMAIN,
@@ -462,6 +463,211 @@ export async function evaluateSourceFinality(provider: SourceBurnProvider, block
     return { final: true, detail: `tx block ${blockNumber.toString()} <= ${mode} head ${head.toString()} on "${network}"` };
   }
   throw new Error(`[CCTP] Unknown finality_mode "${mode}" for cross-chain source "${network}" — refusing to assume finality`);
+}
+
+// ── PHASE 21G — worker-side source-finality recovery ───────────────────────
+/**
+ * Advance ONE recorded `source_finalizing` transfer once its source block
+ * crosses the SAME registry-configured finality boundary detection already used.
+ *
+ * WHY THIS EXISTS: `detectSourceBurn()` is the only writer of this state, and it
+ * is reached from the browser's `POST /checkout/:id/verify`. When the source leg
+ * is not final yet it records `source_finalizing` and hands the browser a
+ * 'processing' answer; only another detection call re-reads finality. If the
+ * customer closes the tab before the source chain finalizes, the row therefore
+ * waits for a browser visit that may never come. This function is the server-side
+ * half of that same step, so the reconciliation worker can finish the source leg
+ * on its own. It is deliberately NOT a second detector:
+ *   • finality comes from `evaluateSourceFinality()` above — the existing
+ *     PHASE 6 registry gate. Same `finality_mode`, same `required_confirmations`
+ *     depth, same `safe`/`finalized` tag semantics, same fail-closed behaviour
+ *     when an endpoint cannot serve the tag. No confirmation count, threshold or
+ *     timeout is introduced here, and nothing is ever treated as final by
+ *     default;
+ *   • the receipt is read through the SAME registry-pinned provider (which proves
+ *     `eth_chainId` before answering), and the tx must still be a successful call
+ *     to the transfer's own recorded `token_messenger` — a reverted, vanished or
+ *     re-pointed source tx can never be finalized from here;
+ *   • the state move goes through `advanceTransferState()`, the PHASE 9 router the
+ *     worker is contractually supposed to drive against: `source_finalizing →
+ *     source_finalized` is a legal monotonic edge, a row that another writer
+ *     already moved reports `concurrent_modification` instead of being
+ *     overwritten, and terminal states are unreachable from here;
+ *   • the money invariants are NOT re-derived and NOT skipped: they were enforced
+ *     before this row could exist (detectSourceBurn verified chain, token,
+ *     recipient, destination domain, the exact M + F burn and the server-approved
+ *     maxFee, and bound the message to the event), and this function re-reads only
+ *     the block position of the tx the row is already pinned to by
+ *     UNIQUE(source_tx_hash, source_network). It writes exactly three columns —
+ *     `state`, `source_finalized_at`, `updated_at`. It never touches an amount, a
+ *     recipient, `payments`, `payment_intents`, a receipt or a webhook.
+ *
+ * `source_finalized_at` is set in the same transaction as the state move because
+ * the existing attestation service refuses to attest a `source_finalized` row
+ * without it, and its 30-minute window is measured from that column: writing the
+ * state alone would park the journey in a state nothing can act on.
+ *
+ * OUTCOMES mirror the detection result taxonomy: every "we cannot prove it yet"
+ * path is a retryable failure that leaves `state` untouched, and only a
+ * demonstrably final block advances. So a transient RPC outage, a block that has
+ * not caught up, and a burn that can never be valid are all handled without ever
+ * manufacturing progress — the caller re-checks on the next due window.
+ *
+ * Every non-advancing outcome stamps `updated_at` (guarded by the same
+ * `state='source_finalizing'` predicate, so it can never touch a row another
+ * stage owns). That stamp is the throttling mechanism: the worker sweep selects
+ * rows whose `updated_at` is older than its re-check interval, so an unreachable
+ * or permanently-invalid source tx is re-read on a bounded cadence instead of on
+ * every tick. `updated_at` is not a due-gate for any sweep that could act on a
+ * `source_finalizing` row — attestation keys off `next_attestation_attempt_at`
+ * and the destination-timeout sweep additionally requires
+ * `attestation_status='complete'` — so refreshing it cannot change when the row
+ * later becomes eligible for anything else.
+ */
+export type SourceFinalityAdvanceCode =
+  | SourceBurnFailureCode
+  | 'transfer_not_found'
+  | 'illegal_transition'
+  | 'concurrent_modification';
+
+export type SourceFinalityAdvance =
+  | { ok: true; outcome: 'finalized'; transferId: string; state: 'source_finalized'; detail: string }
+  | { ok: true; outcome: 'not_final'; transferId: string; state: string; detail: string }
+  /** Row is not in `source_finalizing` — a stage this mover does not own, left exactly as found. */
+  | { ok: true; outcome: 'not_eligible'; transferId: string; state: string; detail: string }
+  | { ok: false; code: SourceFinalityAdvanceCode; reason: string; retryable: boolean };
+
+export interface AdvanceSourceFinalityInput {
+  transferId: string;
+  /** Test seam, same contract as detectSourceBurn. Production omits it. */
+  providerFactory?: SourceBurnProviderFactory;
+  /** Injectable clock (unixepoch seconds) so back-off is deterministic in tests. */
+  nowSeconds?: number;
+}
+
+interface SourceFinalityRow {
+  id: string;
+  payment_intent_id: string;
+  state: string;
+  source_network: string;
+  source_tx_hash: string | null;
+  source_block_number: number | null;
+  token_messenger: string;
+}
+
+export async function advanceSourceFinality(
+  input: AdvanceSourceFinalityInput,
+): Promise<SourceFinalityAdvance> {
+  const db = getDb();
+  const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const row = db
+    .prepare(
+      `SELECT id,payment_intent_id,state,source_network,source_tx_hash,source_block_number,token_messenger
+         FROM cross_chain_transfers WHERE id=?`,
+    )
+    .get(input.transferId) as SourceFinalityRow | undefined;
+  if (!row) {
+    // Nothing to stamp, nothing to advance: the id came from a sweep that is at
+    // worst one tick stale.
+    return { ok: false, code: 'transfer_not_found', reason: `cross_chain_transfers "${input.transferId}" not found`, retryable: false };
+  }
+  // THE only state this mover owns. 'source_finalized'/'attestation_pending' belong
+  // to the attestation sweep and every terminal state is never resumed (PHASE 9).
+  // Not eligible is NOT a failure and must not be throttled either: this is a
+  // no-op read of a row another stage owns, and stamping it would fight that
+  // stage's own back-off bookkeeping.
+  if (row.state !== 'source_finalizing') {
+    return { ok: true, outcome: 'not_eligible', transferId: row.id, state: row.state, detail: `state "${row.state}" is not the source-finalizing stage` };
+  }
+
+  // From here on every path returns without advancing, and every one of them
+  // throttles the next look at this row.
+  const defer = () => db.prepare(
+    `UPDATE cross_chain_transfers SET updated_at=? WHERE id=? AND state='source_finalizing'`,
+  ).run(now, row.id);
+
+  // Re-check the row is still a coherent, registered source burn binding.
+  const txHash = (row.source_tx_hash ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(txHash)) {
+    defer();
+    return { ok: false, code: 'invalid_tx_hash', reason: `transfer ${row.id} has no well-formed source_tx_hash to re-check`, retryable: false };
+  }
+  if (!isCctpSource(row.source_network)) {
+    defer();
+    return { ok: false, code: 'source_not_registered', reason: `source "${row.source_network}" is not a registered CCTP source`, retryable: false };
+  }
+
+  // Same provider seam as detection: registry-pinned, chain-id-proven, fail closed.
+  const factory = input.providerFactory ?? defaultProviderFactory;
+  let provider: SourceBurnProvider;
+  try {
+    provider = await factory(row.source_network);
+    await provider.ensureChainIdMatches?.();
+  } catch (err) {
+    return fail2('provider_error', `Source provider unavailable for "${row.source_network}": ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+
+  let receipt: TransactionReceipt | null;
+  try {
+    receipt = await provider.getTransactionReceipt(txHash);
+  } catch (err) {
+    return fail2('provider_error', `Source receipt re-read failed on "${row.source_network}": ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+  // Not indexed yet / reorged out of every canonical chain: prove nothing, wait.
+  if (!receipt) {
+    return fail2('receipt_missing', `Source transaction ${txHash} is not readable on "${row.source_network}" right now`, true);
+  }
+  // Existing failure semantics, unchanged: a reverted source tx is never a
+  // journey. No state is manufactured — the row stays where detection left it.
+  if (receipt.status !== 'success') {
+    return fail2('receipt_reverted', 'Source transaction reverted', false);
+  }
+  // The recorded burn must still be a call to THIS transfer's TokenMessenger.
+  if (receipt.to.toLowerCase() !== row.token_messenger.toLowerCase()) {
+    return fail2('not_token_messenger_call', `Source transaction was sent to ${receipt.to}, not the recorded TokenMessenger ${row.token_messenger}`, false);
+  }
+
+  let finality: FinalityVerdict;
+  try {
+    // Live canonical position, exactly as detection uses it — a tx that moved
+    // under a reorg is judged at its CURRENT block, never at a stale one.
+    finality = await evaluateSourceFinality(provider, receipt.blockNumber);
+  } catch (err) {
+    return fail2('provider_error', `Source finality cannot be proven for "${row.source_network}": ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+  if (!finality.final) {
+    defer();
+    return { ok: true, outcome: 'not_final', transferId: row.id, state: row.state, detail: finality.detail };
+  }
+
+  // Atomic: the legal edge AND the timestamp the attestation gate requires.
+  // advanceTransferState stamps `updated_at` itself on a successful move, so the
+  // row becomes eligible for the attestation sweep immediately.
+  const advanced = db.transaction(() => {
+    const adv = advanceTransferState(row.id, 'source_finalized', { nowSeconds: now });
+    if (adv.ok) {
+      db.prepare(
+        `UPDATE cross_chain_transfers SET source_finalized_at=COALESCE(source_finalized_at, ?)
+          WHERE id=? AND state='source_finalized'`,
+      ).run(now, row.id);
+    }
+    return adv;
+  })();
+  if (!advanced.ok) {
+    // A concurrent advance already moved the row (or the edge is illegal): never
+    // overwrite it, and never report progress we did not make. `defer()` is a
+    // no-op here when the winner already moved the row out of this state.
+    defer();
+    return { ok: false, code: advanced.code, reason: advanced.reason, retryable: advanced.code === 'concurrent_modification' };
+  }
+  return { ok: true, outcome: 'finalized', transferId: row.id, state: 'source_finalized', detail: finality.detail };
+
+  // Uniform failure constructor for this mover (detection's `fail` returns a
+  // different result type, so this keeps its shape local and explicit).
+  function fail2(code: SourceFinalityAdvanceCode, reason: string, retryable: boolean): SourceFinalityAdvance {
+    defer();
+    return { ok: false, code, reason, retryable };
+  }
 }
 
 // ── Main entry point ───────────────────────────────────────────────────────

@@ -6,6 +6,8 @@ import { PI_SETTLEMENT_GRACE_S } from '../blockchain/arc-provider.js';
 import { requestAttestation, type FetchLike } from '../blockchain/cctp-attestation.js';
 import { settleDestination } from '../blockchain/cctp-destination.js';
 import type { DestinationProvider } from '../blockchain/cctp-destination.js';
+import { advanceSourceFinality } from '../blockchain/cctp-source.js';
+import type { SourceBurnProviderFactory } from '../blockchain/cctp-source.js';
 import { advanceTransferState } from '../blockchain/cctp-state.js';
 
 let running = false;
@@ -17,12 +19,30 @@ const CROSS_CHAIN_BATCH = 25;
 // destination_failed after this window, so a stuck journey can't pin an intent
 // in 'processing' forever (the expiry sweep then releases it).
 const DESTINATION_TIMEOUT_S = 60 * 60;
+// PHASE 21G — how long a `source_finalizing` row must sit before the worker
+// re-reads its source finality. Detection only parks a row here when the source
+// block has NOT yet crossed the registry boundary, so the only thing that can
+// change the verdict is time passing on the source chain. The worker ticks every
+// 30s; re-looking at a row every 5 min is already far tighter than any supported
+// finality mode needs, and it bounds RPC load to one read per stale row per
+// window (a Source that never finalizes would otherwise be re-read every tick).
+// Rows are selected by `updated_at`, which advanceSourceFinality stamps on every
+// non-advancing outcome — so this is a throttle, not a deadline, and it can
+// never finalize anything early.
+const SOURCE_FINALITY_RECHECK_S = 5 * 60;
 
 export interface CrossChainDeps {
   /** Circle Iris fetch. Defaults to global fetch (production). Injectable in tests. */
   fetchImpl?: FetchLike;
   /** Builds the Arc destination receipt reader. Defaults to the registry provider. */
   providerFactory?: (destinationNetwork: string) => DestinationProvider;
+  /**
+   * PHASE 21G: builds the SOURCE-chain reader used by the source-finality
+   * re-check. Defaults to the registry-pinned ArcProvider (production); tests
+   * MUST inject a fake, because this sweep would otherwise issue live RPC for
+   * every `source_finalizing` row in the shared test database.
+   */
+  sourceProviderFactory?: SourceBurnProviderFactory;
   /** Injectable clock (unixepoch seconds). */
   nowSeconds?: number;
 }
@@ -126,11 +146,50 @@ export function runStuckReset(now: number): number {
  * replay), so re-running this tick is always safe and a restart resumes exactly
  * where it left off. Errors are isolated per-transfer: one poisoned row can
  * never stall the batch or crash the loop.
+ *
+ * PHASE 21G added step 0: recovering a `source_finalizing` row whose source block
+ * has since become final. It runs FIRST so a transfer that finalizes in this tick
+ * is eligible for the attestation sweep in the same tick.
  */
-export async function tickCrossChain(deps?: CrossChainDeps): Promise<{ attested: number; settled: number; timedOut: number }> {
+export async function tickCrossChain(deps?: CrossChainDeps): Promise<{ finalized: number; attested: number; settled: number; timedOut: number }> {
   const db = getDb();
   const now = deps?.nowSeconds ?? Math.floor(Date.now() / 1000);
-  const stats = { attested: 0, settled: 0, timedOut: 0 };
+  const stats = { finalized: 0, attested: 0, settled: 0, timedOut: 0 };
+
+  // ── 0. Source-finality recovery sweep (PHASE 21G). The browser submits the burn
+  // via POST /checkout/:id/verify; if the source chain is not final yet the row is
+  // recorded 'source_finalizing' and detection is the ONLY thing that ever re-read
+  // finality — i.e. the journey waited on another browser visit. These rows are
+  // picked up here instead, so the payment completes after the tab is closed.
+  // advanceSourceFinality reuses the existing PHASE 6 registry finality gate and
+  // the PHASE 9 state router; a row whose block is still short stays exactly where
+  // it is (only `updated_at` moves) and is re-checked next window. It never marks a
+  // transfer failed and never emits an event, so this sweep cannot duplicate or
+  // manufacture anything.
+  const dueForFinality = db.prepare(
+    `SELECT id FROM cross_chain_transfers
+      WHERE state='source_finalizing'
+        AND source_tx_hash IS NOT NULL
+        AND updated_at <= ?
+      ORDER BY updated_at ASC LIMIT ?`,
+  ).all(now - SOURCE_FINALITY_RECHECK_S, CROSS_CHAIN_BATCH) as Array<{ id: string }>;
+  for (const { id } of dueForFinality) {
+    try {
+      const res = await advanceSourceFinality({
+        transferId: id, providerFactory: deps?.sourceProviderFactory, nowSeconds: now,
+      });
+      if (res.ok && res.outcome === 'finalized') {
+        stats.finalized += 1;
+      } else if (!res.ok && !res.retryable) {
+        // A source tx that can never be valid stays parked (existing semantics:
+        // this project has no writer for a failed/reorg source state). Loud in the
+        // logs, silent in the database — nothing here is allowed to invent progress.
+        console.warn(`[Worker] source-finality recovery permanently refused for ${id}: ${res.code} - ${res.reason}`);
+      }
+    } catch (err) {
+      console.error(`[Worker] source-finality tick failed for ${id}:`, err);
+    }
+  }
 
   // ── 1. Attestation sweep (PHASE 7). Only due, finalized, attestation-stage rows.
   // requestAttestation itself enforces the back-off/timeout/finality gates, so

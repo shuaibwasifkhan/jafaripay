@@ -8,6 +8,9 @@ import { clsx } from 'clsx';
 import { USDC_DECIMALS } from '@/onchain-facts';
 import { resolveCheckoutNetwork, isWrongNetwork } from '@/checkout-network';
 import { buildCctpCheckoutPlan, tokenMessengerV2Abi, type CctpSourceRoute } from '@/cctp-checkout';
+import {
+  CROSS_CHAIN_VERIFY_PROFILE, SAME_CHAIN_VERIFY_PROFILE, browserFetch, verifyCheckoutTransaction, type VerifyProfile,
+} from '@/checkout-verify-client';
 import { describeCheckoutAmounts, type CheckoutFeesView } from '@/checkout-fees';
 import { Amount } from '@/onchain-money';
 import { formatAddress, formatUSDC } from '../../lib/format';
@@ -183,45 +186,39 @@ export default function CheckoutPage() {
   // Same-chain and DIRECT (F = 0) intents get null — their UX is unchanged.
   const feeLines = describeCheckoutAmounts(intent);
 
-  // Backend verification loop
+  // Backend verification loop. The loop itself lives in the pure bridge module
+  // (src/checkout-verify-client.ts) so its HTTP contract is testable; this wrapper
+  // owns only the React-bound inputs and the ONE submission guard.
+  // PHASE 21F: `profile` defaults to the unchanged same-chain behaviour, and the
+  // cross-chain leg passes CROSS_CHAIN_VERIFY_PROFILE — one verifier, one endpoint,
+  // two poll budgets. `verifyingRef` is shared by both, so a hash can never be
+  // submitted twice concurrently from this page.
   const verifyingRef = useRef(false);
-  const verifyPayment = useCallback(async (txh: string) => {
+  const verifyPayment = useCallback(async (txh: string, profile: VerifyProfile = SAME_CHAIN_VERIFY_PROFILE) => {
     if (verifyingRef.current) return;
     if (intentChainId == null) return; // never verify against an unknown/undefaulted chain
     verifyingRef.current = true;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      await new Promise<void>(r => setTimeout(r, 3000));
-      try {
-        const res = await fetch(`/api/checkout/${id}/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tx_hash: txh, chain_id: intentChainId,
-            // Optional receipt destination. Empty is omitted; the server rejects
-            // a malformed one with 400 BEFORE the money path, so it is validated
-            // client-side too and never sent as a bad value.
-            ...(receiptEmailRef.current.trim() ? { receipt_email: receiptEmailRef.current.trim() } : {}),
-          }),
-        });
-        const data = await res.json() as { status?: string; error?: string; receipt_id?: string };
-
-        // Terminal outcomes — stop polling immediately.
-        if (data.status === 'succeeded') { dispatch({ type: 'SUCCEEDED', receiptId: data.receipt_id ?? null }); verifyingRef.current = false; return; }
-        if (data.status === 'expired') { dispatch({ type: 'EXPIRED' }); verifyingRef.current = false; return; }
-        if (data.status === 'failed') { dispatch({ type: 'FAILED', error: data.error ?? 'Verification failed' }); verifyingRef.current = false; return; }
-
-        // Permanent HTTP errors (e.g. 400 malformed tx_hash / wrong_network, 422 verification
-        // failure) must NOT be retried — surface them instead of waiting indefinitely.
-        if (res.status === 400 || res.status === 422) {
-          dispatch({ type: 'FAILED', error: data.error ?? 'Payment verification failed' });
-          verifyingRef.current = false; return;
-        }
-        // Otherwise (e.g. status 'processing' — tx not yet confirmed) keep polling.
-      } catch { /* network/RPC transient error — keep polling */ }
+    try {
+      await verifyCheckoutTransaction({
+        checkoutId: id ?? '',
+        chainId: intentChainId,
+        txHash: txh,
+        profile,
+        dispatch,
+        // browserFetch, not a bare `fetch`: this used to be an inline `fetch(...)`
+        // call, and passing the global as a value would make the bridge call it
+        // detached (receiver `undefined`). The wrapper preserves the shipped call
+        // form — see the note on browserFetch in src/checkout-verify-client.ts.
+        fetchImpl: browserFetch,
+        // Optional receipt destination. Empty is omitted; the server rejects a
+        // malformed one with 400 BEFORE the money path, so it is validated client-side
+        // too and never sent as a bad value.
+        receiptEmail: receiptEmailRef.current,
+      });
+    } finally {
+      verifyingRef.current = false;
     }
-    dispatch({ type: 'FAILED', error: 'Verification timed out. Contact the merchant with your transaction hash.' });
-    verifyingRef.current = false;
-  }, [id, intentChainId]);
+  }, [id, intentChainId, dispatch]);
 
   // React to wagmi tx hash appearing — use ref to avoid re-running on step changes
   const prevHash = useRef<string | undefined>();
@@ -275,9 +272,17 @@ export default function CheckoutPage() {
   // CCTP PHASE 4 — cross-chain source leg. Two sequential signatures, all params
   // server-authoritative (buildCctpCheckoutPlan refuses if the GET omitted the
   // route): (1) approve the source TokenMessenger, (2) depositForBurn to Arc
-  // (domain 26) minting to the merchant's pinned Arc wallet. After the burn
-  // lands we show a 'submitted' state — source-burn detection + Arc settlement
-  // are the server-side PHASE 5/8 responsibilities, never a same-chain verify.
+  // (domain 26) minting to the merchant's pinned Arc wallet.
+  // PHASE 21F — after the burn hash exists the checkout MUST report it, exactly as
+  // the same-chain leg reports a transfer. Handing it to the SAME verify bridge
+  // (POST /api/checkout/:id/verify) is what reaches the existing server-side
+  // detectSourceBurn(): it creates the cross_chain_transfers row, emits
+  // payment.cross_chain.source_burn_detected and moves the intent to 'processing',
+  // which is what lets the reconciliation worker attest, observe Circle's forward
+  // mint and settle the payment (receipt + webhooks). Before 21F nothing in the
+  // browser ever called it, so a real paid journey left no record at all. The
+  // cross-chain profile keeps the 'submitted' state while the journey is in flight
+  // and never claims success — settlement proof stays server-side.
   const handlePayCrossChain = async () => {
     if (!intent) return;
     const plan = buildCctpCheckoutPlan(intent);
@@ -322,6 +327,10 @@ export default function CheckoutPage() {
         });
       }
       dispatch({ type: 'SUBMITTED', hash: burnHash });
+      // PHASE 21F — report the burn to the existing detection pipeline. The burn may
+      // not be mined yet; the server answers retryable-'processing' and the bridge
+      // keeps polling, so no extra waiting or error handling is needed here.
+      void verifyPayment(burnHash, CROSS_CHAIN_VERIFY_PROFILE);
     } catch (e) {
       const msg = (e as Error)?.message ?? '';
       if (msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('denied')) {
@@ -434,6 +443,15 @@ export default function CheckoutPage() {
                 <div className="text-center">
                   <p className="text-lg font-bold text-ink mb-1">Payment failed</p>
                   <p className="text-xs text-slate-500">{verifyError ?? 'Something went wrong'}</p>
+                  {/* PHASE 21F — a failure must never hide the customer's own
+                      transaction hash: when money really did leave the wallet, that
+                      hash is the only handle the customer and the merchant share. */}
+                  {txHash && explorerTx && (
+                    <a href={explorerTx} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-1.5 text-xs text-forest-700 hover:text-forest-800 mt-2">
+                      <ExternalLink size={11} /> View transaction
+                    </a>
+                  )}
                 </div>
               </div>
             )}

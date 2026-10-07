@@ -170,6 +170,16 @@ router.post('/:id/verify', async (req: Request, res: Response) => {
   // and lets the reconciliation worker finish attestation → forwarding →
   // destination verification → settlement → merchant credit.
   if (pi.is_cross_chain === 1) {
+    // PHASE 21F — persist the pay-time receipt email on the SAME guarded, additive
+    // terms as the same-chain path below (COALESCE: a merchant-authored address is
+    // never overwritten). The cross-chain credit happens later, inside
+    // settleDestination, which issues the receipt from payment_intents.customer_email
+    // — so without this the address a customer typed would be silently dropped on
+    // this branch. It is validated above, before the money path, and touches no
+    // amount, recipient or state.
+    if (emailInput) {
+      db.prepare("UPDATE payment_intents SET customer_email=COALESCE(customer_email,?),updated_at=unixepoch() WHERE id=?").run(emailInput, pi.id);
+    }
     const burn = await detectSourceBurnImpl({ paymentIntentId: pi.id, sourceTxHash: tx_hash });
     if (burn.ok) {
       res.json({ status: 'processing', transfer_id: burn.transferId, state: burn.state }); return;

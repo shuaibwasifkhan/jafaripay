@@ -44,6 +44,9 @@ const { tickCrossChain } = await import('./workers/reconciliation.ts');
 const { messageTransmitterFor } = await import('./blockchain/cctp-source.ts');
 import type { FetchLike } from './blockchain/cctp-attestation.ts';
 import type { DestinationProvider } from './blockchain/cctp-destination.ts';
+// Type-only import: erased at runtime, so it does NOT evaluate cctp-source.ts
+// (and therefore db/schema.ts) before the DATABASE_URL assignment above.
+import type { SourceBurnProvider } from './blockchain/cctp-source.ts';
 import type { RawLog, TransactionReceipt } from './blockchain/arc-provider.ts';
 import { ARC_CCTP_DOMAIN, addressToBytes32 } from './db/cctp.ts';
 
@@ -110,6 +113,18 @@ function mintingProviderFor(txHash: string): () => DestinationProvider {
   return () => ({ async getTransactionReceipt(h) { return h === txHash ? receipt : null; } });
 }
 const providerNullFactory = (): DestinationProvider => ({ async getTransactionReceipt() { return null; } });
+// PHASE 21G: the worker now also re-reads SOURCE finality for parked
+// `source_finalizing` rows. A null receipt makes that sweep a no-op for rows this
+// file does not own, and keeps the test process off the network.
+const sourceProviderNullFactory = (): SourceBurnProvider => ({
+  async getTransactionReceipt() { return null; },
+  async getLatestBlockNumber() { return 0n; },
+  async getHeadBlockNumber() { return 0n; },
+  // Never reached: this mover stops at the null receipt, so no finality mode is
+  // ever consulted here. Throwing keeps that true rather than pretending a config.
+  getConfig: () => { throw new Error('21G inert source stub: finality is never evaluated'); },
+  async ensureChainIdMatches() { /* inert */ },
+});
 
 // ── Fixtures (per-test merchant for true subscription isolation) ───────────
 let seq = 0;
@@ -278,7 +293,10 @@ test('P12-6: the worker destination-timeout sweep enqueues payment.cross_chain.f
 
   // Fakes make the shared-DB sweep inert for every OTHER suite's rows (no network,
   // no credit); only this row's no-dest-mint + stale clock trips the timeout.
-  await tickCrossChain({ nowSeconds: NOW, fetchImpl: pendingFetch, providerFactory: providerNullFactory });
+  // PHASE 21G added a source-finality recovery sweep to the same tick, so the
+  // source factory is injected too: a null receipt is a retryable no-op that can
+  // never advance another suite's `source_finalizing` row or reach the network.
+  await tickCrossChain({ nowSeconds: NOW, fetchImpl: pendingFetch, providerFactory: providerNullFactory, sourceProviderFactory: sourceProviderNullFactory });
 
   const rows = deliveries(iid, 'payment.cross_chain.failed');
   expect(rows.length).toBe(1);
