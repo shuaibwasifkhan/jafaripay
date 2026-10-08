@@ -62,6 +62,14 @@ at Arc Testnet block 65577812, minted exactly 1,000,000 to the pinned recipient.
   together with Circle **mainnet** account-entitlement confirmation for Forwarding
   (testnet success does not by itself prove production entitlement —
   `docs/CCTP_EXECUTOR_DECISION_BRIEF.md` §6.1/§15).
+
+  > **Dated update (2026-10-08):** this §0 bullet is preserved exactly as written during the
+  > Phase 21C closure, when the above was genuinely open. The entitlement half has since been
+  > overtaken **for one route only**: Base Mainnet → Arc Mainnet Forwarding executed with real
+  > mainnet funds on 2026-10-07 (**§0A**) and was independently re-verified from public chain
+  > data on 2026-10-08 (**§0A-1**). The **written** D-1 sign-off is still outstanding, and
+  > entitlement remains unproven for the other six registered mainnet source networks. See the
+  > matching supersession note in §6.
 - Production RPCs, secrets, hosting, TLS, durable DB, monitoring: unchanged
   (human/infrastructure items, §14–§15).
 
@@ -133,6 +141,11 @@ hash was recorded from Circle's `forwardTxHash` on the attestation
 destination leg. **No independent block-explorer confirmation was captured for this
 close-out, and none is claimed here.**
 
+> **Dated update (2026-10-08):** that statement remains an accurate record of what was held
+> on **2026-10-07** and is preserved verbatim. Independent confirmation was subsequently
+> captured from outside JafariPay — see **§0A-1** below. §0A-1 supplements this paragraph; it
+> does not replace it, and it does not change any 2026-10-07 value above.
+
 **What this evidence newly closes:** Circle **mainnet** Forwarding entitlement for
 Base Mainnet → Arc Mainnet (domain 6 → 26) is no longer inferred from testnet — the
 production forwarder actually executed the destination leg. **What it still does NOT close:**
@@ -144,6 +157,102 @@ the internal event/outbox path is covered by the Phase L W1–W26 matrix).
 **Secrets / PII:** this section intentionally records no API keys, no SMTP credentials, no
 `.env` contents and no signer keys. The receipt's `customer_email` value is deliberately not
 reproduced here — only its delivery status (`sent`) is recorded.
+
+---
+
+## 0A-1. INDEPENDENT PUBLIC VERIFICATION (captured 2026-10-08)
+
+> **Evidence-tier update — keep the tiers separate.** §0A above was recorded on 2026-10-07
+> from **application-held** data (our production SQLite rows plus data the app verified over
+> RPC) and is unchanged. §0A-1 records what was read on **2026-10-08** from **public chain
+> data and third-party block explorers only**. No value below was taken from our database,
+> our API, or our application logs.
+
+**Public sources used (unauthenticated, nothing routed through JafariPay):**
+
+| Source | Operator | Endpoint / URL | Outcome |
+|---|---|---|---|
+| Base Mainnet JSON-RPC | Base public endpoint | `https://mainnet.base.org` | `eth_chainId = 0x2105` → **8453**; tx, receipt, block, logs read |
+| BaseScan | Etherscan (third-party indexer) | `https://basescan.org/tx/0x353ad0e014ea9506404b52c2001b032b00d5693a38053a303cf90e3395f22b42` | HTTP 200, page rendered |
+| Arc Mainnet JSON-RPC | Arc public endpoint | `https://rpc.mainnet.arc.io` | `eth_chainId = 0x13b2` → **5042**; tx, receipt, block, logs read |
+| Arc block explorer | Arc (Blockscout backend v11.3.3, frontend v2.11.3) | `https://explorer.arc.io/tx/0x54a528648f77f7e0210bdd2bb34f74c43767935b1c404ac510fce4b1b8f2e134` | HTTP 200, page rendered |
+
+### Base Mainnet source burn — `0x353ad0e014ea9506404b52c2001b032b00d5693a38053a303cf90e3395f22b42`
+
+| Independently observed | Public value | vs §0A |
+|---|---|---|
+| Chain | 8453 (`eth_chainId` `0x2105`) | agrees — `base_mainnet` |
+| Receipt status | `0x1` (success) | agrees — supersedes the wallet UI's "Interaction failed" |
+| Block | **52,301,522** | **new** — not previously recorded |
+| Block hash | `0x60752173ccc96a92fb58df6ee430d09893d14b12b6db406d3bdb8393d252aa02` | **new** |
+| Timestamp | **2026-10-07 16:59:51 UTC** | **new** |
+| Finality | tx block is below the `finalized` head (52,321,696 at capture) | **new** — inside the finalized segment |
+| From (depositor) | `0x2ebcd5d751c5ea788ebca0032f5bd23daa0564c7`, labelled `shuaib.base.eth` by BaseScan | agrees |
+| To | `0x28b5a0e9c621a5badaa536219b3a228c8168cf5d`, labelled **Circle CCTP: Token Messenger V2** by BaseScan | agrees — the mainnet `TokenMessengerV2` pinned in `server/db/cctp.ts` |
+| Method | BaseScan decodes the call as `Deposit For Burn With Hook` | agrees — `depositForBurnWithHook` |
+| `amount` | **1,016,011** base units = 1.016011 USDC. BaseScan shows two 1.016011 USDC Transfers: payer → Token Minter V2, then → `0x000…000` (burned) | agrees — gross M+F |
+| `maxFee` | **16,011** base units = 0.016011 USDC | agrees — F |
+| `destinationDomain` | **26** | agrees — Arc |
+| `minFinalityThreshold` | **2000** | agrees — Standard |
+| `destinationCaller` | `bytes32(0)` | agrees |
+| `burnToken` | `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913` | agrees — native USDC on Base |
+| `mintRecipient` | `0x3af65566013269a1c2f6ee97d49f93a98d51d220` | equals the recipient the journey intended |
+| `hookData` | 32 bytes, decoding to ASCII hook name **`cctp-forward`**, version `0`, tail length `0` | agrees — Circle's reserved forwarding hook |
+
+### Arc Mainnet destination settlement — `0x54a528648f77f7e0210bdd2bb34f74c43767935b1c404ac510fce4b1b8f2e134`
+
+| Independently observed | Public value | vs §0A |
+|---|---|---|
+| Chain | 5042 (`eth_chainId` `0x13b2`) | agrees — `arc_mainnet` |
+| Receipt status | `0x1` (success); the explorer labels the method `receiveMessage` | agrees |
+| Block | **24,764,898** | **new** — not previously recorded |
+| Block hash | `0x18b06846a61f1cee20c43250e1f4f01ffdf1f003906548f95b16e627a2e7abd0` | **new** |
+| Timestamp | **2026-10-07 17:20:05 UTC** — **20 min 14 s** after the source burn | **new** |
+| Finality | tx block is below the `finalized` head (24,843,739 at capture); 78,130 confirmations at RPC capture, 78,675 shown by the explorer | **new** |
+| From (executor) | `0x603fafafdbc9e068e7ea55a98cf4f3b40484b144` — **unlabelled** by the explorer and absent from this repository | limitation — see below |
+| To | `0x81d40f21f12a8f0e3252bccb954d722d4c464b64`, named **MessageTransmitterV2** by the explorer | agrees — the mainnet `MessageTransmitterV2` |
+| Mint to merchant | native USDC `0x3600000000000000000000000000000000000000` Transfer of **1,000,000** base units = **1.000000 USDC** to `0x3af65566…d220`; explorer: "Tokens minted … for 1 USDC" | agrees — exactly M, **not** M+F |
+| Fee leg | second mint Transfer of **16,011** base units = 0.016011 USDC to `0xdd86b8215163553c96684a5abcb631f050f8854b` | **new** — magnitude equals F, to an address that is not the merchant |
+| Destination gas | `value = 0`; explorer reports a transaction fee of **0.004350377096 USDC** paid by the executor (Arc settles gas in USDC) | **new** — neither the merchant nor JafariPay paid destination gas |
+
+**What this independent pass closes.** Both hashes exist, on the two expected chains, with
+success status, inside finalized blocks, and the money math on public chain state equals §0A
+exactly: `M+F = 1,016,011` burned on Base with `maxFee = 16,011`, and **exactly**
+`M = 1,000,000` minted to the intended recipient on Arc — with `destination_domain 26`,
+`min_finality_threshold 2000`, `destination_caller bytes32(0)` and the `cctp-forward` hook
+all readable without consulting JafariPay. Contract addresses were independently **named**
+by the explorers (`TokenMessengerV2`, `MessageTransmitterV2`), not just matched to our
+constants.
+
+**What it does NOT close — no claim is made.**
+
+- **Executor identity.** Public data proves the destination leg was signed, gas-paid and
+  broadcast by a third party that is neither the merchant nor this platform. That the party
+  is **Circle's forwarder** rests on the application-held `forwardTxHash` returned by
+  Circle's attestation (`server/blockchain/cctp-attestation.ts`). The address
+  `0x603fafaf…` is unlabelled on the explorer and appears nowhere in this repository.
+- **Circle attestation provenance.** Not independently re-verified in this pass; the
+  attestation remains application-held evidence.
+- **Webhook delivery.** Still unexercised by any evidence for this UAT, unchanged from §0A.
+- **Our own bookkeeping.** `pi_x39anzavxvj60ojq0gyseqpz`, `pay_845ktggmrz49cpig26fkdqad`,
+  `rcpt_y42kg3b70s43fh2pn85souen` and `email_status=sent` exist only in our SQLite rows.
+  Chain data proves settlement; it proves nothing about our records.
+- **Not an unrelated third-party customer.** BaseScan labels the source wallet
+  `shuaib.base.eth` — the project owner's own funded wallet. This was real mainnet money,
+  and must not be described as a payment from an unrelated external customer.
+- **Route coverage.** Only Base Mainnet → Arc Mainnet is proven with real funds. The other
+  six registered mainnet source networks remain unproven.
+
+**Negative results, recorded as obtained.** Programmatic explorer APIs were **not**
+reachable and are logged as NOT OBTAINED rather than worked around: BaseScan's V1 API
+returned `NOTOK — You are using a deprecated V1 endpoint` (no API key configured), and the
+Arc explorer's Blockscout `/api/v2/*` routes returned **HTTP 403** behind a Cloudflare
+challenge. The explorer evidence above therefore comes from the rendered public transaction
+pages, fetched 2026-10-08.
+
+**Secrets / PII:** this section records no API keys, no SMTP credentials, no `.env`
+contents and no signer keys. Public chain addresses and transaction hashes are not secrets;
+the receipt's `customer_email` value remains deliberately unreproduced.
 
 ---
 
@@ -163,6 +272,15 @@ verified** at code level:
 
 **Phase 21 is an OPERATIONAL milestone.** No additional code phase is defined.
 The system is **READY FOR OPERATIONAL PROVISIONING** — not yet production-live.
+
+> **Dated supersession (2026-10-08):** the sentence above is the pre-launch status recorded
+> when this section was written, and is preserved as history. It is **no longer the current
+> state**: JafariPay is live at `https://jafari.co.in`, `ENABLE_LIVE_PAYMENTS=true` has been
+> operator-confirmed on the production VPS (2026-10-08), and the real-money
+> Base Mainnet → Arc Mainnet CCTP Forwarding journey completed on 2026-10-07 (**§0A**),
+> independently re-verified from public chain data and third-party explorers on 2026-10-08
+> (**§0A-1**). Remaining operational gaps are listed accurately in §0A and §0A-1 — the D-1
+> **written** sign-off and live merchant webhook delivery are still not evidenced.
 
 ---
 
@@ -375,6 +493,16 @@ and Circle MAINNET account entitlement for Forwarding must be confirmed before
 production (`docs/CCTP_EXECUTOR_DECISION_BRIEF.md` §6.1/§15). Options A/B remain
 architecturally possible; no production code change is needed for C.
 
+> **Dated supersession (2026-10-08):** the paragraph above stands as the decision record as
+> written, including the still-outstanding **written** D-1 sign-off. One clause is now
+> overtaken by evidence: "Circle MAINNET account entitlement for Forwarding must be confirmed
+> before production". Entitlement for **Base Mainnet → Arc Mainnet** is no longer an open
+> question to be confirmed — it was exercised with real mainnet funds on 2026-10-07, with
+> Circle's forwarding infrastructure executing the destination leg (**§0A**), independently
+> re-read from public chain data on 2026-10-08 (**§0A-1**). It is **not** thereby confirmed
+> for the other six registered mainnet source networks, which remain unproven with real
+> funds, and this section still records no written owner sign-off.
+
 ---
 
 ## 7. Wallet / Funding Requirements
@@ -525,7 +653,7 @@ half-wired Brevo credentials; `RPC_PROXY_BASE_URL` set without `RPC_PROXY_TOKEN`
 | Production RPCs | PENDING INFRASTRUCTURE | 10 mainnet networks need dedicated endpoints (§5) |
 | Network configuration | COMPLETE | Registry seeded from CIRCLE_INVENTORY; `is_enabled` gates |
 | CCTP configuration | COMPLETE | Contract pair, domains, finality threshold all pinned in `server/db/cctp.ts` |
-| Executor model selected | **PENDING HUMAN SIGN-OFF** | Evidence supports Option C (Circle Forwarding) — implemented + testnet-verified (§0). Written owner approval + Circle mainnet entitlement remain (§6, §14 #1) |
+| Executor model selected | **PENDING HUMAN SIGN-OFF** | Evidence supports Option C (Circle Forwarding) — implemented, testnet-verified (§0), and run with real mainnet funds on Base → Arc (§0A, independently re-verified §0A-1). Circle mainnet Forwarding entitlement is no longer an assumption **for that route**; the other six registered sources remain unproven. **Written** owner approval still PENDING (§6, §14 #1) |
 | Production wallets | PENDING HUMAN | Merchant wallets provisioned by merchants; executor wallet if Option A |
 | Native gas | PENDING HUMAN | ARCY on Arc for executor (Option A only) |
 | USDC operational balance | NOT REQUIRED | Non-custodial: JafariPay never holds USDC |

@@ -511,6 +511,44 @@ Two smoke tests are defined:
 
 ### 13.B — Cross-chain Base → Arc CCTP test
 
+> **EXECUTED — PASS (2026-10-07).** This procedure has now been run once against real
+> mainnet infrastructure and completed end to end. The evidence record is
+> `docs/PRODUCTION_GO_LIVE_READINESS.md` **§0A** (application-held rows) and **§0A-1**
+> (independent public verification from chain RPC data and third-party explorers, captured
+> 2026-10-08). The procedure below is preserved unchanged for the next deliberate run.
+>
+> - Identifiers: intent `pi_x39anzavxvj60ojq0gyseqpz`, transfer `cct_uq64gsr4kgahtkfd8v0pe1uf`,
+>   payment `pay_845ktggmrz49cpig26fkdqad` (`succeeded`, 1.000000 USDC, `arc_mainnet` / 5042),
+>   receipt `rcpt_y42kg3b70s43fh2pn85souen` with `email_status=sent`.
+> - Source burn (Base Mainnet, chain 8453, block 52301522, 2026-10-07 16:59:51 UTC,
+>   receipt `status=0x1`): `depositForBurnWithHook` of 1.016011 USDC
+>   (merchant amount 1.000000 + Circle forwarding fee 0.016011) to `TokenMessengerV2`
+>   `0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d`, with destination domain 26, minimum finality
+>   threshold 2000, empty destination caller and the `cctp-forward` hook.
+>   Tx `0x353ad0e014ea9506404b52c2001b032b00d5693a38053a303cf90e3395f22b42`.
+> - Destination settlement (Arc Mainnet, chain 5042, block 24764898, 2026-10-07 17:20:05 UTC,
+>   receipt `status=0x1`): `receiveMessage` on `MessageTransmitterV2`
+>   `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64` minting **exactly 1.000000 USDC** to the
+>   merchant's pinned address. Tx
+>   `0x54a528648f77f7e0210bdd2bb34f74c43767935b1c404ac510fce4b1b8f2e134`.
+> - State path observed: `source_finalizing → source_finalized → attestation_pending →
+>   settled`, with `attestation_status=complete` and `claim_status=confirmed`. Settlement
+>   completed server-side; the customer's browser was not participating.
+> - The destination leg was signed, gas-paid and broadcast by a third-party EOA
+>   (`0x603FAfaFDBC9E068e7Ea55A98Cf4f3B40484b144`, unlabelled on the explorer). Public chain
+>   data confirms a third party executed it; that this is Circle's forwarder rests on the
+>   application-held `forwardTxHash`.
+> - **Preflight deviation, recorded honestly:** the **written** D-1 sign-off required by the
+>   Preflight bullet below was not separately captured before this run, which proceeded on the
+>   already-implemented Option C. That sign-off remains outstanding.
+> - **Still not exercised by this run** (unchanged limitations, do not claim them):
+>   merchant webhook delivery to a live external endpoint (Section 7.1); the
+>   attestation-timeout path into `cross_chain.attestation_failed`; the Section 15/16 rollback
+>   and escalation routes; and every source network other than Base Mainnet — six other
+>   registered mainnet sources remain unproven with real funds.
+> - **A passing run is not a regression test.** Re-running this moves real USDC on real
+>   chains and requires fresh go-live authorization under Section 12.
+
 - **Preflight:** All Section 11 checkboxes green; **executor model D-1 already selected and implemented**; source and destination CCTP contract addresses verified against `https://developers.circle.com/cctp`; Base mainnet and Arc mainnet both have dedicated production RPCs. **If D-1 = Option C (Circle Forwarding):** confirm Circle mainnet Forwarding entitlement for the pair first (Section 9.2); the burn then goes out as `depositForBurnWithHook` with gross M+F and the fee quote must succeed (fail-closed) at intent creation; expect a `forwardTxHash` observed on Arc executed by Circle's forwarder rather than a JafariPay/merchant broadcast.
 - **Test amount:** 1 USDC.
 - **Payment intent:** create via merchant API with `cross_chain=true, source_network=base_mainnet, destination=arc_mainnet`.

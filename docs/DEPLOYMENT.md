@@ -52,7 +52,7 @@ too short.
 | `CHECKOUT_BASE_URL` | Yes | Public base URL used to build `checkout_url`, e.g. `https://pay.example.com`. |
 | `JAFARIPAY_DOMAIN` | Yes | Domain shown in the SIWE sign-in message, e.g. `pay.example.com`. |
 | `DATABASE_URL` | No | Absolute path to the SQLite file (default `./data/jafaripay.db`). |
-| `ENABLE_LIVE_PAYMENTS` | No | **Leave unset.** Must remain disabled — Arc Testnet only. |
+| `ENABLE_LIVE_PAYMENTS` | Yes for live / mainnet operation | Strict `=== 'true'` gate. **Unset or `false` = testnet-only** (the safe default); `true` enables live API keys, live settlement wallets and live-class (mainnet) payment intents. **This project's production deployment runs `ENABLE_LIVE_PAYMENTS=true`** (operator-confirmed on the production VPS, 2026-10-08) — see §11a for the deliberate go-live procedure and §11 for testnet-only operation. |
 | `RPC_PROXY_BASE_URL` / `RPC_PROXY_TOKEN` / `RPC_PROXY_CHAINS` | No | Optional keyed RPC proxy; falls back to the public Arc RPC when unset. |
 
 Generate a secret:

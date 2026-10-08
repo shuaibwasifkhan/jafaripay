@@ -337,6 +337,33 @@ This audit adds **no new blockers** — but C1–C5 become blockers **specifical
 - D-1 sign-off (unchanged). D-2/D-3/D-5/D-6/D-7 (unchanged, infra).
 - **New (this audit):** (a) License: add MIT LICENSE file vs withdraw MIT claim; (b) promote cross-chain publicly NOW (fix copy + redeploy) or hold website story until mainnet entitlement — recommend **hold public cross-chain marketing until entitlement, fix fee copy immediately regardless** (wrong money-path claims must not persist even in the same-chain narrative); (c) OpenAPI: generate a real spec vs drop the claim; (d) package identity rename/publish decision.
 
+> **Dated update (2026-10-08) — two of these decisions are now closed, and one recommendation
+> is overtaken by events.** This audit's rows and recommendations above are preserved exactly
+> as written on 2026-10-06; they are a snapshot, not the current state.
+>
+> - **(a) License — decided: MIT.** A standard MIT `LICENSE` file now exists at the repository
+>   root and `package.json` carries `"license": "MIT"`. The pre-existing "Open source — MIT
+>   License" product copy is therefore **backed** rather than withdrawn, and `README.md` now
+>   cites the license explicitly. The factual rows in this audit (C17: "no LICENSE file, no pkg
+>   license field"; §23 tables) were accurate when written and are superseded as of this date.
+> - **(b) Marketing hold — overtaken.** The recommendation to *hold public cross-chain
+>   marketing until mainnet entitlement* was correct on the evidence available on 2026-10-06.
+>   That premise changed: the real-money **Base Mainnet → Arc Mainnet** CCTP v2 Forwarding
+>   journey completed on **2026-10-07** (`docs/PRODUCTION_GO_LIVE_READINESS.md` **§0A**), was
+>   independently re-verified from public chain data and third-party explorers on
+>   **2026-10-08** (**§0A-1**), and the corrected public copy is **deployed** to
+>   `https://jafari.co.in`. Public promotion is now permitted **within the scope that evidence
+>   supports** — that single route only, with the standing exclusions recorded in §0A/§0A-1
+>   (no written D-1 sign-off, no live webhook-delivery evidence, no claim that the other six
+>   registered mainnet sources work, and the UAT was funded from the project owner's own
+>   wallet, not an unrelated customer).
+> - **Fee-copy work (C1–C3, C6–C16) is complete and live**, so the audit's highest-integrity
+>   finding — the repeated "1:1 / maxFee = 0" wording on a money path — no longer applies to
+>   the deployed product. `src/checkout-fees.test.ts` U5 keeps that guarded by test.
+> - **(c) OpenAPI spec and (d) package identity remain undecided**, and D-2/D-3/D-5/D-6/D-7
+>   remain open infrastructure items. The "live deployment lagging HEAD" observation in §27 is
+>   likewise superseded: production is aligned with the repository at the time of this update.
+
 ## 26. Recommended Upgrade Sequence
 
 1. **Copy corrections (local, zero-risk):** C1→C3 (fee semantics — highest integrity risk), C6–C7 (docs wrong facts), C10, C12–C16.

@@ -277,6 +277,33 @@ The production deployment has processed a real Arc Mainnet USDC payment:
 - Transaction: `0x9d82a3b3d2cf47192d179febf7f44bbc850ac5dc53912a57a6279f196fae74ef`
 - Explorer: https://explorer.arc.io/tx/0x9d82a3b3d2cf47192d179febf7f44bbc850ac5dc53912a57a6279f196fae74ef
 
+### Cross-chain: Base Mainnet to Arc Mainnet via Circle CCTP v2 Forwarding
+
+Real mainnet USDC moved from Base Mainnet (chain 8453) to Arc Mainnet (chain 5042) on
+2026-10-07. The customer burned the merchant amount plus a server-quoted Circle forwarding
+fee on the source chain, and the merchant was minted exactly the requested amount on Arc.
+
+- Source burn, 1.016011 USDC on Base Mainnet (merchant amount 1.000000 plus Circle
+  forwarding fee 0.016011):
+  `0x353ad0e014ea9506404b52c2001b032b00d5693a38053a303cf90e3395f22b42`
+  https://basescan.org/tx/0x353ad0e014ea9506404b52c2001b032b00d5693a38053a303cf90e3395f22b42
+- Destination settlement, exactly 1.000000 USDC minted to the merchant on Arc Mainnet:
+  `0x54a528648f77f7e0210bdd2bb34f74c43767935b1c404ac510fce4b1b8f2e134`
+  https://explorer.arc.io/tx/0x54a528648f77f7e0210bdd2bb34f74c43767935b1c404ac510fce4b1b8f2e134
+- Forwarding parameters readable on public chain data: destination domain 26, minimum
+  finality threshold 2000 (Standard), empty destination caller, and Circle's `cctp-forward`
+  hook.
+- The journey finished server-side after the hosted checkout handed the source transaction
+  to the API. The customer's browser was not required for settlement.
+- Evidence, including exactly what is and is not claimed: `docs/PRODUCTION_GO_LIVE_READINESS.md`
+  section 0A (application-held records, 2026-10-07) and section 0A-1 (independent public
+  verification from chain RPC data and third-party explorers, 2026-10-08).
+
+Scope of this proof: Base Mainnet to Arc Mainnet is the **only** cross-chain route verified
+with real mainnet funds. Seven mainnet source networks are registered for the Forwarding
+route; the other six have not been exercised with real money. The source wallet in this test
+was the project owner's own funded wallet, not an unrelated third-party customer.
+
 ## Resources
 
 - GitHub: https://github.com/shuaibwasifkhan/jafaripay
@@ -288,5 +315,5 @@ The production deployment has processed a real Arc Mainnet USDC payment:
 
 ## License
 
-Open source. See repository for details.
+Released under the MIT license. See [LICENSE](LICENSE) for details.
 
